@@ -1,0 +1,311 @@
+# RoboMaster EP ROS 2 Humble Setup
+
+This project uses a DJI RoboMaster EP with ROS 2 Humble on Ubuntu 22.04. It documents how to install the ROS driver, connect to the robot over Wi-Fi, view the camera stream, teleoperate the chassis, and control the arm/gripper.
+
+## Why ROS 2 Humble
+
+ROS 2 Humble is used because it is the ROS 2 distribution built for Ubuntu 22.04. Foxy was built around Ubuntu 20.04 and is now end-of-life, so Humble is a better choice for a current Ubuntu 22.04 development machine.
+
+References:
+
+- ROS 2 Foxy EOL: https://docs.ros.org/en/foxy/Releases/End-of-Life.html
+- ROS 2 Humble Ubuntu 22.04 support: https://docs.ros.org/en/humble/Releases/Release-Humble-Hawksbill.html
+
+## Environment
+
+- Ubuntu 22.04
+- ROS 2 Humble
+- DJI RoboMaster EP
+- Workspace: `~/robomaster_ws`
+
+## Install ROS 2 Humble
+
+```bash
+sudo apt update
+sudo apt upgrade -y
+sudo apt install -y locales software-properties-common curl gnupg lsb-release
+
+sudo locale-gen en_US en_US.UTF-8
+sudo update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+export LANG=en_US.UTF-8
+
+sudo add-apt-repository universe -y
+sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
+  -o /usr/share/keyrings/ros-archive-keyring.gpg
+
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main" | \
+  sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
+
+sudo apt update
+sudo apt install -y ros-humble-desktop ros-dev-tools
+
+echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
+source ~/.bashrc
+```
+
+Verify:
+
+```bash
+echo $ROS_DISTRO
+ros2 doctor --report
+```
+
+## Install Dependencies
+
+```bash
+sudo apt update
+sudo apt install -y \
+  python3-colcon-common-extensions \
+  python3-pip \
+  build-essential \
+  cmake \
+  ninja-build \
+  python3-dev \
+  libopus-dev \
+  nasm \
+  netcat-openbsd \
+  ros-humble-xacro \
+  ros-humble-cv-bridge \
+  ros-humble-robot-state-publisher \
+  ros-humble-joint-state-publisher \
+  ros-humble-joy \
+  ros-humble-joy-teleop \
+  ros-humble-teleop-twist-keyboard \
+  ros-humble-rqt-image-view
+
+python3 -m pip install --user --upgrade pip setuptools wheel packaging scikit-build-core cmake ninja
+python3 -m pip install --user --force-reinstall "numpy==1.24.4"
+python3 -m pip install --user -U pyyaml numpy-quaternion
+```
+
+## Install vcpkg and RoboMaster SDK
+
+```bash
+sudo apt install -y curl zip unzip tar
+
+cd ~
+git clone https://github.com/microsoft/vcpkg.git
+cd ~/vcpkg
+./bootstrap-vcpkg.sh
+
+echo 'export VCPKG_ROOT="$HOME/vcpkg"' >> ~/.bashrc
+echo 'export PATH="$VCPKG_ROOT:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+Install the SDK and media codec:
+
+```bash
+python3 -m pip install --user git+https://github.com/jeguzzi/RoboMaster-SDK.git
+
+python3 -m pip install --user --no-build-isolation \
+  'rm-libmedia-codec @ git+https://github.com/jeguzzi/RoboMaster-SDK.git#subdirectory=lib/libmedia_codec'
+```
+
+Verify:
+
+```bash
+python3 -c "import robomaster; print('robomaster SDK OK')"
+python3 -c "import libmedia_codec; print('libmedia_codec OK')"
+python3 -c "import cv_bridge; print('cv_bridge OK')"
+```
+
+## Build robomaster_ros
+
+```bash
+mkdir -p ~/robomaster_ws/src
+cd ~/robomaster_ws/src
+git clone https://github.com/jeguzzi/robomaster_ros.git
+
+cd ~/robomaster_ws
+source /opt/ros/humble/setup.bash
+colcon build
+source install/setup.bash
+
+echo "source ~/robomaster_ws/install/setup.bash" >> ~/.bashrc
+```
+
+## Connect to the Robot
+
+Connect the RoboMaster EP and laptop to the same Wi-Fi network. Find the robot IP from the router admin page or the DJI RoboMaster app.
+
+Check connectivity:
+
+```bash
+ping <ROBOT_IP>
+printf "command;version;" | nc -w 5 <ROBOT_IP> 40923
+```
+
+## Direct IP Workaround
+
+If RoboMaster discovery fails but ping and the text SDK work, set the robot and laptop IPs explicitly:
+
+```bash
+export ROBOMASTER_LOCAL_IP=<LAPTOP_IP>
+export ROBOMASTER_ROBOT_IP=<ROBOT_IP>
+```
+
+Patch `~/robomaster_ws/src/robomaster_ros/robomaster_ros/robomaster_ros/client.py` so discovery is skipped when `ROBOMASTER_ROBOT_IP` is set.
+
+Add near the imports:
+
+```python
+import os
+import robomaster.config
+```
+
+Replace `wait_for_robot` with:
+
+```python
+def wait_for_robot(serial_number: Optional[str]) -> None:
+    robot_ip = os.environ.get("ROBOMASTER_ROBOT_IP")
+    local_ip = os.environ.get("ROBOMASTER_LOCAL_IP")
+
+    if robot_ip:
+        robomaster.config.ROBOT_IP_STR = robot_ip
+    if local_ip:
+        robomaster.config.LOCAL_IP_STR = local_ip
+
+    if robot_ip:
+        return
+
+    found = False
+    while not found:
+        try:
+            found = robomaster.conn.scan_robot_ip(user_sn=serial_number)
+        except OSError:
+            pass
+        if not found:
+            time.sleep(random.uniform(1.0, 2.0))
+```
+
+Rebuild:
+
+```bash
+cd ~/robomaster_ws
+colcon build --packages-select robomaster_ros
+source install/setup.bash
+```
+
+## Launch Robot Driver
+
+```bash
+export ROBOMASTER_LOCAL_IP=<LAPTOP_IP>
+export ROBOMASTER_ROBOT_IP=<ROBOT_IP>
+
+ros2 launch robomaster_ros main.launch \
+  model:=ep \
+  conn_type:=sta \
+  serial_number:=<ROBOT_SERIAL_NUMBER> \
+  chassis_timeout:=0.5 \
+  arm:=true \
+  gripper:=true
+```
+
+Successful logs should include:
+
+```text
+Found a robot
+Connected
+Enabled modules: Battery, Camera, Chassis, LED, Speaker, Gimbal, Blaster
+```
+
+## Camera Feed
+
+```bash
+ros2 run rqt_image_view rqt_image_view
+```
+
+Select:
+
+```text
+/camera/image_raw
+```
+
+## Keyboard Teleop
+
+```bash
+ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -r cmd_vel:=/cmd_vel
+```
+
+Useful keys:
+
+```text
+i = forward
+, = backward
+j = rotate left
+l = rotate right
+k = stop
+```
+
+Emergency stop command:
+
+```bash
+ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{}" --once
+```
+
+## Arm and Gripper
+
+The ROS arm/gripper actions may abort on some setups even when the hardware works. The RoboMaster text SDK can be used directly.
+
+Open gripper:
+
+```bash
+printf "command;robotic_gripper open 4;" | nc -w 3 <ROBOT_IP> 40923
+```
+
+Close gripper:
+
+```bash
+printf "command;robotic_gripper close 4;" | nc -w 3 <ROBOT_IP> 40923
+```
+
+Move arm forward 1 cm:
+
+```bash
+printf "command;robotic_arm move x 1 y 0;" | nc -w 3 <ROBOT_IP> 40923
+```
+
+Move arm up 1 cm:
+
+```bash
+printf "command;robotic_arm move x 0 y 1;" | nc -w 3 <ROBOT_IP> 40923
+```
+
+Move arm down 1 cm:
+
+```bash
+printf "command;robotic_arm move x 0 y -1;" | nc -w 3 <ROBOT_IP> 40923
+```
+
+Recenter arm:
+
+```bash
+printf "command;robotic_arm recenter;" | nc -w 5 <ROBOT_IP> 40923
+```
+
+Stop arm:
+
+```bash
+printf "command;robotic_arm stop;" | nc -w 3 <ROBOT_IP> 40923
+```
+
+## Common Checks
+
+List ROS topics:
+
+```bash
+ros2 topic list
+```
+
+Check camera rate:
+
+```bash
+ros2 topic hz /camera/image_raw
+```
+
+Check arm position:
+
+```bash
+ros2 topic echo /arm_position --once
+```
