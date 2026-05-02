@@ -11,12 +11,18 @@ import argparse
 import json
 import os
 import secrets
+import shutil
 import subprocess
 import sys
+import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+
+
+WHISPER_BIN = os.environ.get("CS603_WHISPER_BIN", "/opt/homebrew/bin/whisper")
+WHISPER_MODEL = os.environ.get("CS603_WHISPER_MODEL", "tiny.en")
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -57,10 +63,15 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
         self.send_error(404)
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path != "/api/intent":
-            self.send_error(404)
+        if self.path == "/api/intent":
+            self._handle_intent()
             return
+        if self.path == "/api/transcribe":
+            self._handle_transcribe()
+            return
+        self.send_error(404)
 
+    def _handle_intent(self) -> None:
         try:
             if not request_is_authorized(self.headers, self.server.token):
                 raise PermissionError("unauthorized voice intent request")
@@ -87,6 +98,67 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
             )
         except Exception as exc:  # noqa: BLE001 - expose demo-time failures.
             self._send_json({"ok": False, "error": str(exc)}, status=500)
+
+    def _handle_transcribe(self) -> None:
+        tmp_audio = ""
+        try:
+            if not token_header_ok(self.headers, self.server.token):
+                raise PermissionError("unauthorized transcribe request")
+            if not publish_allowed(self.client_address[0], self.server.allow_lan_publish):
+                raise PermissionError("LAN publish disabled; restart with --allow-lan-publish for phone demos")
+
+            length = int(self.headers.get("Content-Length", "0"))
+            if length <= 0:
+                raise ValueError("empty audio body")
+            data = self.rfile.read(length)
+
+            ext = ".webm"
+            ctype = str(self.headers.get("Content-Type", "")).lower()
+            if "wav" in ctype:
+                ext = ".wav"
+            elif "ogg" in ctype:
+                ext = ".ogg"
+            elif "mp4" in ctype:
+                ext = ".m4a"
+
+            fd, tmp_audio = tempfile.mkstemp(suffix=ext, prefix="cs603_voice_")
+            os.close(fd)
+            with open(tmp_audio, "wb") as fh:
+                fh.write(data)
+
+            text = run_whisper(tmp_audio)
+            transcript = text.strip()
+            response: dict[str, Any] = {
+                "ok": True,
+                "transcript": transcript,
+                "model": WHISPER_MODEL,
+            }
+
+            if transcript:
+                intent = classify_intent(transcript)
+                try:
+                    result = publish_intent(self.server.container, intent)
+                    response.update(
+                        {
+                            "intent": intent,
+                            "commandText": transcript,
+                            "stdout": result.stdout[-2000:],
+                            "stderr": result.stderr[-2000:],
+                        }
+                    )
+                except Exception as pub_exc:  # noqa: BLE001 - keep transcript visible even if ROS publish fails
+                    response["intent"] = intent
+                    response["publish_error"] = str(pub_exc)
+
+            self._send_json(response)
+        except Exception as exc:  # noqa: BLE001 - surface demo-time failures.
+            self._send_json({"ok": False, "error": str(exc)}, status=500)
+        finally:
+            if tmp_audio and os.path.exists(tmp_audio):
+                try:
+                    os.unlink(tmp_audio)
+                except OSError:
+                    pass
 
     def log_message(self, fmt: str, *args: Any) -> None:
         sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
@@ -150,13 +222,46 @@ def publish_allowed(client_host: str, allow_lan_publish: bool) -> bool:
     return allow_lan_publish or client_host == "::1" or client_host.startswith("127.")
 
 
-def request_is_authorized(headers: Any, expected_token: str) -> bool:
-    if not str(headers.get("Content-Type", "")).split(";", maxsplit=1)[0].strip() == "application/json":
-        return False
+def token_header_ok(headers: Any, expected_token: str) -> bool:
     if not secrets.compare_digest(str(headers.get("X-CS603-Voice-Token", "")), expected_token):
         return False
     host = str(headers.get("Host", ""))
     return same_host_if_present(headers.get("Origin"), host) and same_host_if_present(headers.get("Referer"), host)
+
+
+def request_is_authorized(headers: Any, expected_token: str) -> bool:
+    if not str(headers.get("Content-Type", "")).split(";", maxsplit=1)[0].strip() == "application/json":
+        return False
+    return token_header_ok(headers, expected_token)
+
+
+def run_whisper(audio_path: str) -> str:
+    if not os.path.exists(WHISPER_BIN):
+        raise RuntimeError(f"whisper binary not found at {WHISPER_BIN}")
+    out_dir = tempfile.mkdtemp(prefix="cs603_whisper_out_")
+    try:
+        cmd = [
+            WHISPER_BIN,
+            audio_path,
+            "--model", WHISPER_MODEL,
+            "--language", "en",
+            "--task", "transcribe",
+            "--fp16", "False",
+            "--output_dir", out_dir,
+            "--output_format", "txt",
+            "--verbose", "False",
+        ]
+        result = subprocess.run(cmd, text=True, capture_output=True, timeout=60, check=False)
+        if result.returncode != 0:
+            raise RuntimeError((result.stderr or result.stdout or "whisper failed").strip()[-1500:])
+        base = os.path.splitext(os.path.basename(audio_path))[0]
+        txt_path = os.path.join(out_dir, base + ".txt")
+        if not os.path.exists(txt_path):
+            return ""
+        with open(txt_path, encoding="utf-8") as fh:
+            return fh.read()
+    finally:
+        shutil.rmtree(out_dir, ignore_errors=True)
 
 
 def same_host_if_present(url: str | None, host: str) -> bool:

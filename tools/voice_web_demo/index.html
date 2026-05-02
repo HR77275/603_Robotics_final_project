@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>CS603 Voice Rover</title>
+  <title>CS603 Sam</title>
   <style>
     :root {
       color-scheme: dark;
@@ -285,7 +285,7 @@
       100% { height: 8px; }
     }
 
-    @media (max-width: 760px) and (orientation: portrait) {
+    @media (max-width: 760px) and (orientation: portrait) and (pointer: coarse) {
       body::before {
         content: "rotate phone";
         position: fixed;
@@ -352,6 +352,84 @@
         font-size: 12px;
       }
     }
+
+    /* Live interim transcription glow */
+    input.live {
+      border-color: var(--cyan);
+      animation: livePulse 1.2s ease-in-out infinite;
+    }
+    @keyframes livePulse {
+      0%, 100% { box-shadow: 0 4px 0 var(--shadow), 0 0 0 2px rgba(103,210,255,.4); }
+      50% { box-shadow: 0 4px 0 var(--shadow), 0 0 0 7px rgba(103,210,255,.12); }
+    }
+
+    /* Big live transcript overlay */
+    #liveText {
+      min-height: 30px;
+      padding: 6px 10px;
+      font-size: clamp(16px, 2.6vw, 24px);
+      font-weight: 700;
+      color: var(--cyan);
+      background: rgba(103,210,255,.06);
+      border: 2px dashed transparent;
+      letter-spacing: .4px;
+      text-transform: lowercase;
+      opacity: 0;
+      transition: opacity .15s;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #liveText.show {
+      opacity: 1;
+      border-color: rgba(103,210,255,.55);
+      animation: livePulse 1.2s ease-in-out infinite;
+    }
+    #liveText.locked {
+      color: var(--green);
+      border-color: rgba(101,212,110,.6);
+      background: rgba(101,212,110,.08);
+      animation: none;
+    }
+
+    /* Thinking mode (during fetch to /api/intent) */
+    .thinking .body { background: var(--cyan); animation: thinkPulse 1s ease-in-out infinite; }
+    .thinking .eye  { background: var(--cyan); animation: thinkBlink .55s steps(2) infinite; }
+    .thinking .mouth { background: var(--cyan); animation: thinkPulse .8s ease-in-out infinite; }
+    .thinking.bot   { animation: thinkBob 1.2s ease-in-out infinite; }
+    .thinking .bar  { background: var(--cyan); animation: thinkBars 600ms ease-in-out infinite; }
+    @keyframes thinkPulse {
+      0%, 100% { opacity: .95; transform: scale(1); }
+      50%      { opacity: .35; transform: scale(.85); }
+    }
+    @keyframes thinkBlink {
+      0%, 100% { opacity: 1; }
+      50%      { opacity: .2; }
+    }
+    @keyframes thinkBob {
+      0%, 100% { transform: translateY(0) rotate(-2deg); }
+      50%      { transform: translateY(-10px) rotate(2deg); }
+    }
+    @keyframes thinkBars {
+      0%, 100% { height: 10px; }
+      50%      { height: 36px; }
+    }
+
+    /* Animated trailing dots for status text */
+    .dots::after {
+      content: '';
+      display: inline-block;
+      width: 1.4em;
+      text-align: left;
+      animation: dotcycle 1.1s steps(4) infinite;
+    }
+    @keyframes dotcycle {
+      0%   { content: ''; }
+      25%  { content: '.'; }
+      50%  { content: '..'; }
+      75%  { content: '...'; }
+      100% { content: ''; }
+    }
   </style>
 </head>
 <body>
@@ -364,9 +442,11 @@
 
     <section class="console">
       <div class="top">
-        <h1>Voice Rover</h1>
+        <h1>Sam</h1>
         <div class="status" id="status">BOOTING...</div>
       </div>
+
+      <div id="liveText" aria-live="polite"></div>
 
       <div class="input-row">
         <input id="transcript" autocomplete="off" autocapitalize="none" placeholder="say: follow me / stop / come over">
@@ -382,6 +462,7 @@
       </div>
 
       <div class="switch-row">
+        <button id="whisperBtn">Whisper: tap to record</button>
         <button id="always">Always off</button>
       </div>
 
@@ -399,6 +480,11 @@
     const botEl = document.getElementById("bot");
     const waveEl = document.getElementById("wave");
     const alwaysEl = document.getElementById("always");
+    const liveTextEl = document.getElementById("liveText");
+    const whisperEl = document.getElementById("whisperBtn");
+    let mediaRecorder = null;
+    let recordedChunks = [];
+    let whisperBusy = false;
     const demoToken = "__CS603_VOICE_DEMO_TOKEN__";
     let alwaysOn = false;
     let recognition = null;
@@ -417,7 +503,7 @@
     ];
 
     const bars = 18;
-    botEl.innerHTML = pixels.flatMap((row) => row.split("")).map((cell) => {
+    botEl.innerHTML = pixels.flatMap((row) => row.split("").map((cell) => [cell, row])).map(([cell, row]) => {
       const cls = cell === "e" ? "edge" : cell === "b" ? "body" : cell === "m" ? "mouth" : ".";
       if (cell === ".") return "<span class='px'></span>";
       if (row.includes("ebebeb") && cell === "b") return "<span class='px eye'></span>";
@@ -428,7 +514,27 @@
     function setMode(mode) {
       botEl.classList.toggle("active", mode === "active");
       botEl.classList.toggle("warn", mode === "warn");
-      waveEl.classList.toggle("idle-bars", mode !== "active");
+      botEl.classList.toggle("thinking", mode === "thinking");
+      waveEl.classList.toggle("thinking", mode === "thinking");
+      waveEl.classList.toggle("idle-bars", mode !== "active" && mode !== "thinking");
+    }
+
+    function setStatus(text, color, animateDots) {
+      statusEl.textContent = text;
+      statusEl.style.color = color;
+      statusEl.classList.toggle("dots", !!animateDots);
+    }
+
+    function setLiveText(text, locked) {
+      const trimmed = (text || "").trim();
+      if (!trimmed) {
+        liveTextEl.textContent = "";
+        liveTextEl.classList.remove("show", "locked");
+        return;
+      }
+      liveTextEl.textContent = trimmed;
+      liveTextEl.classList.add("show");
+      liveTextEl.classList.toggle("locked", !!locked);
     }
 
     function log(line) {
@@ -453,9 +559,10 @@
     async function publishTranscript(text) {
       const transcript = text.trim();
       if (!transcript) return;
-      setMode("active");
-      statusEl.textContent = "SENDING...";
-      statusEl.style.color = "var(--yellow)";
+      transcriptEl.classList.remove("live");
+      setLiveText(transcript, true);
+      setMode("thinking");
+      setStatus("THINKING", "var(--cyan)", true);
       try {
         const res = await fetch("/api/intent", {
           method: "POST",
@@ -467,15 +574,18 @@
         });
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.error || "publish failed");
-        statusEl.textContent = data.intent;
-        statusEl.style.color = "var(--green)";
+        setMode("active");
+        setStatus(data.intent, "var(--green)", false);
         log(`${JSON.stringify(data.commandText || data.transcript)} -> ${data.intent}`);
-        setTimeout(() => setMode("idle"), 900);
+        setTimeout(() => {
+          setMode("idle");
+          setLiveText("", false);
+        }, 1400);
       } catch (error) {
-        statusEl.textContent = "FAILED";
-        statusEl.style.color = "var(--red)";
+        setStatus("FAILED", "var(--red)", false);
         log(String(error));
         setMode("warn");
+        setTimeout(() => setLiveText("", false), 1500);
       }
     }
 
@@ -501,7 +611,7 @@
     } else {
       recognition = new SpeechRecognition();
       recognition.lang = "en-US";
-      recognition.interimResults = false;
+      recognition.interimResults = true;
       recognition.continuous = true;
 
       recognition.onstart = () => {
@@ -509,33 +619,61 @@
         listenEl.classList.add("recording");
         listenEl.textContent = "Live";
         alwaysEl.textContent = alwaysOn ? "Always on" : "Always off";
-        statusEl.textContent = "LISTENING...";
-        statusEl.style.color = "var(--yellow)";
+        setStatus("LISTENING", "var(--yellow)", true);
         setMode("active");
+        setLiveText("", false);
       };
 
       recognition.onresult = (event) => {
-        const last = event.results[event.results.length - 1];
-        if (!last.isFinal) return;
-        const text = last[0].transcript;
-        transcriptEl.value = text;
-        publishTranscript(text);
+        let finalText = "";
+        let interimText = "";
+        for (let index = event.resultIndex; index < event.results.length; index += 1) {
+          const result = event.results[index];
+          if (result.isFinal) {
+            finalText += result[0].transcript;
+          } else {
+            interimText += result[0].transcript;
+          }
+        }
+        const display = (finalText || interimText).trim();
+        transcriptEl.value = display;
+        if (interimText.trim() && !finalText.trim()) {
+          transcriptEl.classList.add("live");
+          setLiveText(interimText, false);
+        } else {
+          transcriptEl.classList.remove("live");
+        }
+        if (finalText.trim()) {
+          setLiveText(finalText, true);
+          publishTranscript(finalText);
+        }
       };
 
       recognition.onerror = (event) => {
+        const code = event.error || "unknown";
+        const transient = code === "no-speech" || code === "aborted" || code === "audio-capture";
+        log(`speech: ${code}`);
+        if (transient) {
+          // no-speech fires every few seconds in silence — keep listening, do not kill always-on
+          return;
+        }
         alwaysOn = false;
         alwaysEl.classList.remove("on");
         alwaysEl.textContent = "Always off";
-        statusEl.textContent = "SPEECH ERR";
-        statusEl.style.color = "var(--red)";
-        log(event.error || "speech recognition error");
+        let label = code.toUpperCase();
+        if (code === "not-allowed" || code === "service-not-allowed") label = "MIC BLOCKED";
+        else if (code === "network") label = "NET ERR";
+        setStatus(label, "var(--red)", false);
         setMode("warn");
+        transcriptEl.classList.remove("live");
+        setLiveText(code === "not-allowed" ? "click mic permission in url bar" : "", false);
       };
 
       recognition.onend = () => {
         recognizing = false;
         listenEl.classList.remove("recording");
         listenEl.textContent = "Talk";
+        transcriptEl.classList.remove("live");
         if (alwaysOn) {
           setTimeout(() => {
             try {
@@ -544,8 +682,9 @@
               // Some mobile browsers throttle immediate restarts.
             }
           }, 450);
-        } else if (statusEl.textContent === "LISTENING...") {
+        } else if (statusEl.textContent.startsWith("LISTENING")) {
           setMode("idle");
+          setLiveText("", false);
           health();
         }
       };
@@ -564,6 +703,105 @@
         if (alwaysOn && !recognizing) recognition.start();
         if (!alwaysOn && recognizing) recognition.stop();
         log(`always-on ${alwaysOn ? "enabled" : "disabled"}`);
+      });
+    }
+
+    async function whisperStart() {
+      if (whisperBusy || (mediaRecorder && mediaRecorder.state === "recording")) return;
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({audio: true});
+        recordedChunks = [];
+        const opts = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? {mimeType: "audio/webm;codecs=opus"}
+          : (MediaRecorder.isTypeSupported("audio/webm") ? {mimeType: "audio/webm"} : {});
+        mediaRecorder = new MediaRecorder(stream, opts);
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0) recordedChunks.push(event.data);
+        };
+        mediaRecorder.onstop = async () => {
+          stream.getTracks().forEach((track) => track.stop());
+          const mime = mediaRecorder.mimeType || "audio/webm";
+          const blob = new Blob(recordedChunks, {type: mime});
+          recordedChunks = [];
+          await whisperUpload(blob, mime);
+        };
+        mediaRecorder.start();
+        whisperEl.classList.add("on");
+        whisperEl.textContent = "Whisper: recording — tap to stop";
+        setStatus("RECORDING", "var(--yellow)", true);
+        setMode("active");
+        setLiveText("", false);
+        log("whisper recording started");
+      } catch (error) {
+        log(`mic error: ${error.message || error}`);
+        setStatus("MIC BLOCKED", "var(--red)", false);
+        setMode("warn");
+      }
+    }
+
+    function whisperStop() {
+      if (mediaRecorder && mediaRecorder.state === "recording") {
+        mediaRecorder.stop();
+      }
+    }
+
+    async function whisperUpload(blob, mime) {
+      whisperBusy = true;
+      whisperEl.classList.remove("on");
+      whisperEl.textContent = "Whisper: transcribing...";
+      whisperEl.disabled = true;
+      setStatus("TRANSCRIBING", "var(--cyan)", true);
+      setMode("thinking");
+      try {
+        const res = await fetch("/api/transcribe", {
+          method: "POST",
+          headers: {
+            "Content-Type": mime || "audio/webm",
+            "X-CS603-Voice-Token": demoToken
+          },
+          body: blob
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || "whisper failed");
+        const transcript = (data.transcript || "").trim();
+        transcriptEl.value = transcript;
+        if (!transcript) {
+          setLiveText("(no speech detected)", false);
+          setStatus("EMPTY", "var(--yellow)", false);
+          setMode("warn");
+        } else {
+          setLiveText(transcript, true);
+          if (data.intent) {
+            setStatus(data.intent, "var(--green)", false);
+            setMode("active");
+            log(`whisper: ${JSON.stringify(transcript)} -> ${data.intent}`);
+          } else {
+            setStatus("DONE", "var(--green)", false);
+            log(`whisper: ${JSON.stringify(transcript)}`);
+          }
+          setTimeout(() => {
+            setMode("idle");
+            setLiveText("", false);
+          }, 1800);
+        }
+      } catch (error) {
+        log(`whisper error: ${error.message || error}`);
+        setStatus("WHISPER ERR", "var(--red)", false);
+        setMode("warn");
+      } finally {
+        whisperBusy = false;
+        whisperEl.disabled = false;
+        whisperEl.textContent = "Whisper: tap to record";
+      }
+    }
+
+    if (whisperEl) {
+      whisperEl.addEventListener("click", () => {
+        if (mediaRecorder && mediaRecorder.state === "recording") {
+          whisperStop();
+        } else {
+          whisperStart();
+        }
       });
     }
 
