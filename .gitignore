@@ -1,6 +1,61 @@
+# ROS2 / colcon
 build/
 install/
 log/
-*.pyc
-__pycache__/
 .ros/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+.venv/
+venv/
+env/
+.eggs/
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets / local config — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.json
+credentials.json
+*credentials*
+
+# Voice demo runtime artifacts
+*.wav
+*.webm
+*.ogg
+*.mp3
+recordings/
+audio_cache/
+
+# Whisper model cache
+.cache/
+models/
+
+# Logs
+*.log
+nohup.out
+
+# Personal handoff / scratch notes (keep out of public repo)
+HANDOFF_*.md
+SCRATCH_*.md
+NOTES_*.md
+TODO_*.md
+private/
+scratch/

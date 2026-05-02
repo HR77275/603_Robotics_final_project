@@ -40,14 +40,14 @@ ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{}" --once
 
 ## Git Rules
 
-- Work on a `codex/` branch unless the user explicitly asks otherwise.
+- Work on a `feature/` or `fix/` branch unless the user explicitly asks otherwise.
 - Read files before editing them. Use `apply_patch` for manual edits.
 - Keep commits small, factual, and reviewable.
 - Before every commit:
   - Run `git status --short --branch`.
   - Review `git diff --check` and the staged or unstaged diff.
   - Run the smallest relevant verification command for the change.
-  - Run an adversarial Codex review using a reviewer/checker subagent.
+  - Run an adversarial code review (reviewer/checker pass) before committing.
   - Fix or explicitly document any reviewer finding before committing.
 - Do not commit generated junk, secrets, large demo videos, build outputs, Docker layers, or Overleaf credentials.
 
