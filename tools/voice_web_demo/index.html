@@ -239,21 +239,54 @@
       gap: 8px;
     }
 
+    .switch-row button {
+      height: 64px;
+      font-size: 18px;
+      letter-spacing: 1px;
+    }
+
     .switch-row button.on {
       background: var(--red);
       border-color: #9b3838;
       color: #fff;
     }
 
+    details.advanced {
+      border: 2px solid var(--line);
+      background: #0c1418;
+    }
+
+    details.advanced > summary {
+      cursor: pointer;
+      padding: 8px 12px;
+      color: var(--muted);
+      font-size: 12px;
+      list-style: none;
+      user-select: none;
+    }
+
+    details.advanced[open] > summary {
+      border-bottom: 1px solid var(--line);
+      color: var(--ink);
+    }
+
+    details.advanced > summary::-webkit-details-marker { display: none; }
+
+    details.advanced .mic-row,
+    details.advanced .log {
+      border: none;
+      margin: 0;
+    }
+
     .log {
       min-height: 0;
       overflow: auto;
-      border: 2px solid var(--line);
+      max-height: 180px;
       background: #090d10;
       color: var(--muted);
       padding: 10px;
       white-space: pre-wrap;
-      font-size: 13px;
+      font-size: 12px;
     }
 
     .footer {
@@ -365,23 +398,25 @@
 
     /* Big live transcript overlay */
     #liveText {
-      min-height: 30px;
-      padding: 6px 10px;
-      font-size: clamp(16px, 2.6vw, 24px);
+      min-height: 96px;
+      padding: 14px 16px;
+      font-size: clamp(22px, 4vw, 40px);
       font-weight: 700;
-      color: var(--cyan);
+      color: var(--muted);
       background: rgba(103,210,255,.06);
-      border: 2px dashed transparent;
+      border: 2px dashed rgba(103,210,255,.25);
       letter-spacing: .4px;
       text-transform: lowercase;
-      opacity: 0;
-      transition: opacity .15s;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      opacity: 1;
+      transition: color .15s, border-color .15s;
+      line-height: 1.2;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
     }
     #liveText.show {
-      opacity: 1;
+      color: var(--cyan);
       border-color: rgba(103,210,255,.55);
       animation: livePulse 1.2s ease-in-out infinite;
     }
@@ -466,30 +501,26 @@
         <div class="status" id="status">BOOTING...</div>
       </div>
 
-      <div id="liveText" aria-live="polite"></div>
-
-      <div class="input-row single">
-        <input id="transcript" autocomplete="off" autocapitalize="none" placeholder="type or say: follow me / stop / come over (Enter to send)">
-      </div>
-
-      <div class="mic-row">
-        <select id="micPicker" aria-label="Select microphone"></select>
-      </div>
-
-      <div class="chips">
-        <button data-phrase="follow me">follow</button>
-        <button data-phrase="stop">stop</button>
-        <button data-phrase="come over">come</button>
-        <button data-phrase="hold position">hold</button>
-      </div>
+      <div id="liveText" aria-live="polite">say something</div>
 
       <div class="switch-row">
-        <button id="liveBtn">Live: tap to start</button>
-        <button id="whisperBtn">Whisper: tap to record</button>
+        <button id="liveBtn">🎤 tap to listen</button>
       </div>
 
-      <div class="log" id="log"></div>
-      <div class="footer">Say “follow me”, “stop”, or “come over”. Publishes /voice_intent only.</div>
+      <details class="advanced">
+        <summary>⚙ settings</summary>
+        <div class="mic-row">
+          <select id="micPicker" aria-label="Select microphone"></select>
+        </div>
+      </details>
+
+      <details class="advanced">
+        <summary>▸ event log</summary>
+        <div class="log" id="log"></div>
+      </details>
+
+      <div class="footer">say "follow me", "stop", or "come over"</div>
+      <input id="transcript" type="hidden">
     </section>
   </main>
 
@@ -582,7 +613,7 @@
     function setLiveText(text, locked) {
       const trimmed = (text || "").trim();
       if (!trimmed) {
-        liveTextEl.textContent = "";
+        liveTextEl.textContent = liveActive ? "listening..." : "say something";
         liveTextEl.classList.remove("show", "locked");
         return;
       }
@@ -756,9 +787,9 @@
 
     // ---- Live VAD mode (continuous mic + auto-send on 1s silence) ----
     const liveEl = document.getElementById("liveBtn");
-    const SPEECH_THRESHOLD = 14;     // 0-255 byte avg, tune for your mic
+    const SPEECH_THRESHOLD = 22;     // 0-255 byte avg, tune for your mic (raised: 14 picked up breath)
     const SILENCE_MS = 1000;         // 1s of silence ends an utterance
-    const MIN_UTTERANCE_MS = 350;    // discard sub-350ms blips
+    const MIN_UTTERANCE_MS = 1200;   // Whisper hallucinates on clips <1.2s
     const POLL_INTERVAL_MS = 100;
     let liveActive = false;
     let liveStream = null;

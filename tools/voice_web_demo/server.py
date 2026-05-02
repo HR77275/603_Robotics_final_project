@@ -22,7 +22,7 @@ from urllib.parse import urlparse
 
 
 WHISPER_BIN = os.environ.get("CS603_WHISPER_BIN", "/opt/homebrew/bin/whisper")
-WHISPER_MODEL = os.environ.get("CS603_WHISPER_MODEL", "tiny.en")
+WHISPER_MODEL = os.environ.get("CS603_WHISPER_MODEL", "base.en")
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -247,6 +247,10 @@ def run_whisper(audio_path: str) -> str:
             "--language", "en",
             "--task", "transcribe",
             "--fp16", "False",
+            "--temperature", "0.0",
+            "--no_speech_threshold", "0.6",
+            "--logprob_threshold", "-1.0",
+            "--condition_on_previous_text", "False",
             "--output_dir", out_dir,
             "--output_format", "txt",
             "--verbose", "False",
