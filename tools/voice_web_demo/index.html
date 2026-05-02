@@ -484,6 +484,7 @@
       </div>
 
       <div class="switch-row">
+        <button id="liveBtn">Live: tap to start</button>
         <button id="whisperBtn">Whisper: tap to record</button>
       </div>
 
@@ -750,6 +751,172 @@
         } else {
           whisperStart();
         }
+      });
+    }
+
+    // ---- Live VAD mode (continuous mic + auto-send on 1s silence) ----
+    const liveEl = document.getElementById("liveBtn");
+    const SPEECH_THRESHOLD = 14;     // 0-255 byte avg, tune for your mic
+    const SILENCE_MS = 1000;         // 1s of silence ends an utterance
+    const MIN_UTTERANCE_MS = 350;    // discard sub-350ms blips
+    const POLL_INTERVAL_MS = 100;
+    let liveActive = false;
+    let liveStream = null;
+    let liveAudioCtx = null;
+    let liveAnalyser = null;
+    let liveRecorder = null;
+    let liveChunks = [];
+    let liveLoopHandle = null;
+    let liveSilenceMs = 0;
+    let liveHadSpeech = false;
+    let liveUtteranceStart = 0;
+
+    async function liveStart() {
+      if (liveActive) return;
+      try {
+        const audioConstraint = selectedMicId ? {deviceId: {exact: selectedMicId}} : true;
+        liveStream = await navigator.mediaDevices.getUserMedia({audio: audioConstraint});
+        liveAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const source = liveAudioCtx.createMediaStreamSource(liveStream);
+        liveAnalyser = liveAudioCtx.createAnalyser();
+        liveAnalyser.fftSize = 1024;
+        source.connect(liveAnalyser);
+        liveActive = true;
+        liveEl.classList.add("on");
+        liveEl.textContent = "Live: listening — tap to stop";
+        setStatus("LIVE", "var(--yellow)", true);
+        setMode("active");
+        setLiveText("", false);
+        log("live VAD started");
+        startLiveUtterance();
+        liveLoopHandle = setInterval(monitorLiveLevel, POLL_INTERVAL_MS);
+      } catch (error) {
+        log(`live mic error: ${error.message || error}`);
+        setStatus("MIC BLOCKED", "var(--red)", false);
+        setMode("warn");
+        liveActive = false;
+      }
+    }
+
+    function startLiveUtterance() {
+      if (!liveStream || !liveActive) return;
+      liveChunks = [];
+      liveSilenceMs = 0;
+      liveHadSpeech = false;
+      liveUtteranceStart = Date.now();
+      const opts = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? {mimeType: "audio/webm;codecs=opus"}
+        : (MediaRecorder.isTypeSupported("audio/webm") ? {mimeType: "audio/webm"} : {});
+      liveRecorder = new MediaRecorder(liveStream, opts);
+      liveRecorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) liveChunks.push(event.data);
+      };
+      liveRecorder.onstop = async () => {
+        const duration = Date.now() - liveUtteranceStart;
+        const mime = liveRecorder.mimeType || "audio/webm";
+        const blob = new Blob(liveChunks, {type: mime});
+        liveChunks = [];
+        if (liveHadSpeech && duration >= MIN_UTTERANCE_MS && blob.size > 0) {
+          liveTranscribeChunk(blob, mime);
+        }
+        if (liveActive) startLiveUtterance();
+      };
+      liveRecorder.start();
+    }
+
+    function monitorLiveLevel() {
+      if (!liveAnalyser || !liveActive) return;
+      const buf = new Uint8Array(liveAnalyser.frequencyBinCount);
+      liveAnalyser.getByteFrequencyData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i += 1) sum += buf[i];
+      const avg = sum / buf.length;
+      if (avg > SPEECH_THRESHOLD) {
+        liveSilenceMs = 0;
+        if (!liveHadSpeech) {
+          liveHadSpeech = true;
+          liveUtteranceStart = Date.now();
+        }
+      } else {
+        liveSilenceMs += POLL_INTERVAL_MS;
+        if (liveHadSpeech && liveSilenceMs >= SILENCE_MS &&
+            liveRecorder && liveRecorder.state === "recording") {
+          liveRecorder.stop();
+        }
+      }
+    }
+
+    async function liveTranscribeChunk(blob, mime) {
+      setStatus("TRANSCRIBING", "var(--cyan)", true);
+      setMode("thinking");
+      try {
+        const res = await fetch("/api/transcribe", {
+          method: "POST",
+          headers: {
+            "Content-Type": mime,
+            "X-CS603-Voice-Token": demoToken
+          },
+          body: blob
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || "whisper failed");
+        const transcript = (data.transcript || "").trim();
+        if (transcript) {
+          transcriptEl.value = transcript;
+          setLiveText(transcript, true);
+          if (data.intent) {
+            setStatus(data.intent, "var(--green)", false);
+            log(`live: ${JSON.stringify(transcript)} -> ${data.intent}`);
+          } else {
+            setStatus("DONE", "var(--green)", false);
+            log(`live: ${JSON.stringify(transcript)}`);
+          }
+          setMode("active");
+        } else {
+          log("live: (empty transcript)");
+        }
+        if (liveActive) {
+          setTimeout(() => {
+            if (liveActive) {
+              setStatus("LIVE", "var(--yellow)", true);
+              setMode("active");
+            }
+          }, 900);
+        }
+      } catch (error) {
+        log(`live transcribe error: ${error.message || error}`);
+        setStatus("ERR", "var(--red)", false);
+        setMode("warn");
+      }
+    }
+
+    function liveStop() {
+      liveActive = false;
+      if (liveLoopHandle) { clearInterval(liveLoopHandle); liveLoopHandle = null; }
+      if (liveRecorder && liveRecorder.state === "recording") {
+        try { liveRecorder.stop(); } catch (_err) { /* ignore */ }
+      }
+      liveRecorder = null;
+      if (liveStream) {
+        liveStream.getTracks().forEach((track) => track.stop());
+        liveStream = null;
+      }
+      if (liveAudioCtx) {
+        try { liveAudioCtx.close(); } catch (_err) { /* ignore */ }
+        liveAudioCtx = null;
+      }
+      liveAnalyser = null;
+      liveEl.classList.remove("on");
+      liveEl.textContent = "Live: tap to start";
+      setStatus("READY", "var(--green)", false);
+      setMode("idle");
+      setLiveText("", false);
+      log("live VAD stopped");
+    }
+
+    if (liveEl) {
+      liveEl.addEventListener("click", () => {
+        if (liveActive) liveStop(); else liveStart();
       });
     }
 
