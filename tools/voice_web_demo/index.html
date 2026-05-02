@@ -415,6 +415,26 @@
       50%      { height: 36px; }
     }
 
+    /* Mic picker row */
+    .mic-row {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 6px;
+    }
+    #micPicker {
+      height: 42px;
+      border: 2px solid var(--line);
+      background: #0b1114;
+      color: var(--ink);
+      font-family: inherit;
+      font-size: 13px;
+      padding: 0 10px;
+      box-shadow: 0 4px 0 var(--shadow);
+    }
+    .input-row.single {
+      grid-template-columns: 1fr;
+    }
+
     /* Animated trailing dots for status text */
     .dots::after {
       content: '';
@@ -448,10 +468,12 @@
 
       <div id="liveText" aria-live="polite"></div>
 
-      <div class="input-row">
-        <input id="transcript" autocomplete="off" autocapitalize="none" placeholder="say: follow me / stop / come over">
-        <button class="listen" id="listen" title="Browser speech input">Talk</button>
-        <button class="primary" id="publish">Send</button>
+      <div class="input-row single">
+        <input id="transcript" autocomplete="off" autocapitalize="none" placeholder="type or say: follow me / stop / come over (Enter to send)">
+      </div>
+
+      <div class="mic-row">
+        <select id="micPicker" aria-label="Select microphone"></select>
       </div>
 
       <div class="chips">
@@ -474,40 +496,76 @@
   <script>
     const statusEl = document.getElementById("status");
     const transcriptEl = document.getElementById("transcript");
-    const listenEl = document.getElementById("listen");
-    const publishEl = document.getElementById("publish");
     const logEl = document.getElementById("log");
     const botEl = document.getElementById("bot");
     const waveEl = document.getElementById("wave");
     const alwaysEl = document.getElementById("always");
     const liveTextEl = document.getElementById("liveText");
     const whisperEl = document.getElementById("whisperBtn");
+    const micPickerEl = document.getElementById("micPicker");
     let mediaRecorder = null;
     let recordedChunks = [];
     let whisperBusy = false;
+    let selectedMicId = "";
+
+    async function populateMicPicker() {
+      try {
+        // Need a one-time mic permission for device labels to populate.
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({audio: true});
+          stream.getTracks().forEach((track) => track.stop());
+        } catch (_permErr) {
+          // user may decline; we'll still list devices, just without labels
+        }
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const mics = devices.filter((device) => device.kind === "audioinput");
+        micPickerEl.innerHTML = "";
+        const defaultOpt = document.createElement("option");
+        defaultOpt.value = "";
+        defaultOpt.textContent = "Default microphone";
+        micPickerEl.appendChild(defaultOpt);
+        mics.forEach((mic, index) => {
+          const opt = document.createElement("option");
+          opt.value = mic.deviceId;
+          opt.textContent = mic.label || `Microphone ${index + 1}`;
+          micPickerEl.appendChild(opt);
+        });
+        log(`mic picker: ${mics.length} input(s) found`);
+      } catch (error) {
+        log(`mic picker error: ${error.message || error}`);
+      }
+    }
+
+    if (micPickerEl) {
+      micPickerEl.addEventListener("change", () => {
+        selectedMicId = micPickerEl.value;
+        log(`mic selected: ${micPickerEl.options[micPickerEl.selectedIndex].textContent}`);
+      });
+      populateMicPicker();
+    }
     const demoToken = "__CS603_VOICE_DEMO_TOKEN__";
     let alwaysOn = false;
     let recognition = null;
     let recognizing = false;
 
     const pixels = [
-      ".........",
-      "..eeeee..",
-      ".ebbbbbee",
-      ".ebebebee",
-      ".ebbbbbee",
-      "..bbmbb..",
-      ".bbbbbbb.",
-      ".b.....b.",
-      "........."
+      "...eee...",
+      ".eebbbee.",
+      ".ebbbbbe.",
+      "ebbbbbbbe",
+      "ebbbmbbbe",
+      "ebbbbbbbe",
+      ".ebbbbbe.",
+      ".eebbbee.",
+      "...eee..."
     ];
 
     const bars = 18;
-    botEl.innerHTML = pixels.flatMap((row) => row.split("").map((cell) => [cell, row])).map(([cell, row]) => {
-      const cls = cell === "e" ? "edge" : cell === "b" ? "body" : cell === "m" ? "mouth" : ".";
-      if (cell === ".") return "<span class='px'></span>";
-      if (row.includes("ebebeb") && cell === "b") return "<span class='px eye'></span>";
-      return `<span class='px ${cls}'></span>`;
+    botEl.innerHTML = pixels.flatMap((row) => row.split("")).map((cell) => {
+      if (cell === "e") return "<span class='px edge'></span>";
+      if (cell === "b") return "<span class='px body'></span>";
+      if (cell === "m") return "<span class='px mouth'></span>";
+      return "<span class='px'></span>";
     }).join("");
     waveEl.innerHTML = Array.from({length: bars}, () => "<span class='bar'></span>").join("");
 
@@ -596,19 +654,17 @@
       });
     });
 
-    publishEl.addEventListener("click", () => publishTranscript(transcriptEl.value));
     transcriptEl.addEventListener("keydown", (event) => {
       if (event.key === "Enter") publishTranscript(transcriptEl.value);
     });
 
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      listenEl.disabled = true;
-      listenEl.textContent = "Dictate";
-      listenEl.title = "Use the phone keyboard dictation mic in the text box";
       alwaysEl.disabled = true;
       alwaysEl.textContent = "Dictate mode";
+      log("Web Speech API NOT supported — use Whisper button instead");
     } else {
+      log("Web Speech API: supported. interim=true continuous=true");
       recognition = new SpeechRecognition();
       recognition.lang = "en-US";
       recognition.interimResults = true;
@@ -616,13 +672,20 @@
 
       recognition.onstart = () => {
         recognizing = true;
-        listenEl.classList.add("recording");
-        listenEl.textContent = "Live";
         alwaysEl.textContent = alwaysOn ? "Always on" : "Always off";
         setStatus("LISTENING", "var(--yellow)", true);
         setMode("active");
         setLiveText("", false);
+        log("speech: started — speak now");
       };
+
+      recognition.onaudiostart = () => log("speech: audio capture started");
+      recognition.onsoundstart = () => log("speech: sound detected");
+      recognition.onspeechstart = () => log("speech: speech detected");
+      recognition.onspeechend = () => log("speech: speech ended");
+      recognition.onsoundend = () => log("speech: sound ended");
+      recognition.onaudioend = () => log("speech: audio capture ended");
+      recognition.onnomatch = () => log("speech: NO MATCH — STT could not parse audio");
 
       recognition.onresult = (event) => {
         let finalText = "";
@@ -635,6 +698,7 @@
             interimText += result[0].transcript;
           }
         }
+        log(`onresult: interim=${JSON.stringify(interimText)} final=${JSON.stringify(finalText)}`);
         const display = (finalText || interimText).trim();
         transcriptEl.value = display;
         if (interimText.trim() && !finalText.trim()) {
@@ -671,8 +735,6 @@
 
       recognition.onend = () => {
         recognizing = false;
-        listenEl.classList.remove("recording");
-        listenEl.textContent = "Talk";
         transcriptEl.classList.remove("live");
         if (alwaysOn) {
           setTimeout(() => {
@@ -689,13 +751,6 @@
         }
       };
 
-      listenEl.addEventListener("click", () => {
-        alwaysOn = false;
-        alwaysEl.classList.remove("on");
-        alwaysEl.textContent = "Always off";
-        if (!recognizing) recognition.start();
-      });
-
       alwaysEl.addEventListener("click", () => {
         alwaysOn = !alwaysOn;
         alwaysEl.classList.toggle("on", alwaysOn);
@@ -709,7 +764,8 @@
     async function whisperStart() {
       if (whisperBusy || (mediaRecorder && mediaRecorder.state === "recording")) return;
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({audio: true});
+        const audioConstraint = selectedMicId ? {deviceId: {exact: selectedMicId}} : true;
+        const stream = await navigator.mediaDevices.getUserMedia({audio: audioConstraint});
         recordedChunks = [];
         const opts = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
           ? {mimeType: "audio/webm;codecs=opus"}
