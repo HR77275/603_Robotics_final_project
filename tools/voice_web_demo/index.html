@@ -485,7 +485,6 @@
 
       <div class="switch-row">
         <button id="whisperBtn">Whisper: tap to record</button>
-        <button id="always">Always off</button>
       </div>
 
       <div class="log" id="log"></div>
@@ -499,7 +498,6 @@
     const logEl = document.getElementById("log");
     const botEl = document.getElementById("bot");
     const waveEl = document.getElementById("wave");
-    const alwaysEl = document.getElementById("always");
     const liveTextEl = document.getElementById("liveText");
     const whisperEl = document.getElementById("whisperBtn");
     const micPickerEl = document.getElementById("micPicker");
@@ -544,9 +542,6 @@
       populateMicPicker();
     }
     const demoToken = "__CS603_VOICE_DEMO_TOKEN__";
-    let alwaysOn = false;
-    let recognition = null;
-    let recognizing = false;
 
     const pixels = [
       "...eee...",
@@ -657,109 +652,6 @@
     transcriptEl.addEventListener("keydown", (event) => {
       if (event.key === "Enter") publishTranscript(transcriptEl.value);
     });
-
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alwaysEl.disabled = true;
-      alwaysEl.textContent = "Dictate mode";
-      log("Web Speech API NOT supported — use Whisper button instead");
-    } else {
-      log("Web Speech API: supported. interim=true continuous=true");
-      recognition = new SpeechRecognition();
-      recognition.lang = "en-US";
-      recognition.interimResults = true;
-      recognition.continuous = true;
-
-      recognition.onstart = () => {
-        recognizing = true;
-        alwaysEl.textContent = alwaysOn ? "Always on" : "Always off";
-        setStatus("LISTENING", "var(--yellow)", true);
-        setMode("active");
-        setLiveText("", false);
-        log("speech: started — speak now");
-      };
-
-      recognition.onaudiostart = () => log("speech: audio capture started");
-      recognition.onsoundstart = () => log("speech: sound detected");
-      recognition.onspeechstart = () => log("speech: speech detected");
-      recognition.onspeechend = () => log("speech: speech ended");
-      recognition.onsoundend = () => log("speech: sound ended");
-      recognition.onaudioend = () => log("speech: audio capture ended");
-      recognition.onnomatch = () => log("speech: NO MATCH — STT could not parse audio");
-
-      recognition.onresult = (event) => {
-        let finalText = "";
-        let interimText = "";
-        for (let index = event.resultIndex; index < event.results.length; index += 1) {
-          const result = event.results[index];
-          if (result.isFinal) {
-            finalText += result[0].transcript;
-          } else {
-            interimText += result[0].transcript;
-          }
-        }
-        log(`onresult: interim=${JSON.stringify(interimText)} final=${JSON.stringify(finalText)}`);
-        const display = (finalText || interimText).trim();
-        transcriptEl.value = display;
-        if (interimText.trim() && !finalText.trim()) {
-          transcriptEl.classList.add("live");
-          setLiveText(interimText, false);
-        } else {
-          transcriptEl.classList.remove("live");
-        }
-        if (finalText.trim()) {
-          setLiveText(finalText, true);
-          publishTranscript(finalText);
-        }
-      };
-
-      recognition.onerror = (event) => {
-        const code = event.error || "unknown";
-        const transient = code === "no-speech" || code === "aborted" || code === "audio-capture";
-        log(`speech: ${code}`);
-        if (transient) {
-          // no-speech fires every few seconds in silence — keep listening, do not kill always-on
-          return;
-        }
-        alwaysOn = false;
-        alwaysEl.classList.remove("on");
-        alwaysEl.textContent = "Always off";
-        let label = code.toUpperCase();
-        if (code === "not-allowed" || code === "service-not-allowed") label = "MIC BLOCKED";
-        else if (code === "network") label = "NET ERR";
-        setStatus(label, "var(--red)", false);
-        setMode("warn");
-        transcriptEl.classList.remove("live");
-        setLiveText(code === "not-allowed" ? "click mic permission in url bar" : "", false);
-      };
-
-      recognition.onend = () => {
-        recognizing = false;
-        transcriptEl.classList.remove("live");
-        if (alwaysOn) {
-          setTimeout(() => {
-            try {
-              recognition.start();
-            } catch (_error) {
-              // Some mobile browsers throttle immediate restarts.
-            }
-          }, 450);
-        } else if (statusEl.textContent.startsWith("LISTENING")) {
-          setMode("idle");
-          setLiveText("", false);
-          health();
-        }
-      };
-
-      alwaysEl.addEventListener("click", () => {
-        alwaysOn = !alwaysOn;
-        alwaysEl.classList.toggle("on", alwaysOn);
-        alwaysEl.textContent = alwaysOn ? "Always on" : "Always off";
-        if (alwaysOn && !recognizing) recognition.start();
-        if (!alwaysOn && recognizing) recognition.stop();
-        log(`always-on ${alwaysOn ? "enabled" : "disabled"}`);
-      });
-    }
 
     async function whisperStart() {
       if (whisperBusy || (mediaRecorder && mediaRecorder.state === "recording")) return;
