@@ -1,0 +1,9 @@
+int32 track_id
+robomaster_msgs/RegionOfInterest roi
+float32 depth_m
+float32 raw_depth_m
+float32 tof_range_m
+float32 tof_scale
+bool tof_used
+float32 confidence
+string method

@@ -1,0 +1,167 @@
+# RoboMaster Perception Development Guide
+
+This `src/` folder contains the ROS 2 packages used for the RoboMaster EP perception stack. The current pipeline uses the RoboMaster built-in person detector, DeepSORT tracking, monocular depth estimation, optional ToF correction, and optional face identity association.
+
+## Package Layout
+
+- `robomaster_ros/`: upstream RoboMaster ROS driver package. Keep this as an external dependency or submodule.
+- `robomaster_perception_msgs/`: custom messages for tracked people, person depth, and identity results.
+- `robomaster_perception/`: perception nodes, launch files, and parameter config.
+- `robomaster_vision_overlay/`: earlier/simple overlay utility retained for reference.
+
+## Main Topics
+
+Inputs:
+
+- `/camera/image_color` (`sensor_msgs/msg/Image`): robot camera feed.
+- `/vision` (`robomaster_msgs/msg/Detection`): built-in RoboMaster detections.
+- `/range_0` (`sensor_msgs/msg/Range`): front ToF sensor, when enabled.
+
+Outputs:
+
+- `/people/tracks` (`robomaster_perception_msgs/msg/TrackedPeople`): tracked full-body person boxes.
+- `/people/depth` (`robomaster_perception_msgs/msg/PeopleDepth`): depth estimate per tracked person.
+- `/people/identities` (`robomaster_perception_msgs/msg/PeopleIdentities`): optional face identity per track ID.
+- `/perception/tracking_debug_image` (`sensor_msgs/msg/Image`): camera feed with bbox, track ID, name, and depth overlay.
+
+
+## Fresh Setup Dependencies
+
+Install ROS/apt dependencies from the workspace root:
+
+```bash
+cd ~/robomaster_ws
+source /opt/ros/humble/setup.bash
+rosdep update
+rosdep install --from-paths src --ignore-src -r -y
+```
+
+Install PyTorch for the target machine. For the RTX 3060 setup used here, CUDA 11.8 wheels worked:
+
+```bash
+python3 -m pip install --user   torch==2.7.1+cu118   torchvision==0.22.1+cu118   --index-url https://download.pytorch.org/whl/cu118
+```
+
+Install the remaining ML dependencies:
+
+```bash
+python3 -m pip install --user -r src/robomaster_perception/requirements-ml.txt
+python3 -m pip install --user --force-reinstall "numpy==1.24.4"
+```
+
+`numpy==1.24.4` is important for ROS 2 Humble compatibility with `cv_bridge` and SciPy packages. Avoid NumPy 2.x in this workspace.
+
+Install Torchreid/OSNet for stronger DeepSORT appearance embeddings:
+
+```bash
+cd ~
+git clone https://github.com/KaiyangZhou/deep-person-reid.git
+cd deep-person-reid
+python3 -m pip install --user --no-build-isolation --no-deps .
+```
+
+If the Torchreid install fails because of optional Cython extensions, disable the extension build in `deep-person-reid/setup.py` by changing `ext_modules=cythonize(ext_modules)` to `ext_modules=[]`, then rerun the install command.
+
+## Build
+
+From the workspace root:
+
+```bash
+cd ~/robomaster_ws
+source /opt/ros/humble/setup.bash
+colcon build --packages-select robomaster_perception_msgs robomaster_perception
+source install/setup.bash
+```
+
+If ROS cannot discover the custom message package, restart the daemon:
+
+```bash
+ros2 daemon stop
+ros2 daemon start
+```
+
+## Start The Robot Driver
+
+Run the driver first, with camera, person detection, and ToF enabled. Replace the placeholders with the local values for your robot/network.
+
+```bash
+cd ~/robomaster_ws
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+export ROBOMASTER_LOCAL_IP=<laptop_or_host_ip>
+export ROBOMASTER_ROBOT_IP=<robot_ip>
+
+ros2 launch robomaster_ros main.launch   model:=ep   conn_type:=sta   serial_number:=<robot_serial_number>   camera:=true   vision:=true   vision_targets:='["person"]'   tof_0:=true   tof_rate:=10
+```
+
+Check that detections are available:
+
+```bash
+ros2 topic echo /vision --once --no-daemon
+```
+
+## Start Perception
+
+Recommended first test: tracking and overlay only.
+
+```bash
+cd ~/robomaster_ws
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 launch robomaster_perception tracking.launch.py
+```
+
+View the overlay:
+
+```bash
+ros2 run rqt_image_view rqt_image_view /perception/tracking_debug_image
+```
+
+Start tracking plus depth:
+
+```bash
+ros2 launch robomaster_perception perception.launch.py use_depth:=true use_identity:=false
+```
+
+Start the full pipeline:
+
+```bash
+ros2 launch robomaster_perception perception.launch.py use_depth:=true use_identity:=true
+```
+
+## Face Identity Workflow
+
+Face recognition is only used to associate a name with a tracker ID. The robot should still follow or reason about the full-body tracked box, not the face box.
+
+Create one folder per identity:
+
+```bash
+mkdir -p face_db/images/<person_name>
+```
+
+Add face images into that folder, then build the embedding database:
+
+```bash
+ros2 run robomaster_perception enroll_faces   --image-dir face_db/images   --output face_db/embeddings/face_db.npz
+```
+
+Private face images and generated embeddings are ignored by git by default.
+
+## Useful Debug Commands
+
+```bash
+ros2 topic hz /camera/image_color --no-daemon
+ros2 topic echo /vision --once --no-daemon
+ros2 topic echo /people/tracks --once --no-daemon
+ros2 topic echo /people/depth --once --no-daemon
+ros2 topic echo /people/identities --once --no-daemon
+ros2 topic hz /perception/tracking_debug_image --no-daemon
+```
+
+## Development Notes
+
+- Keep robot IP addresses, serial numbers, personal images, and generated embeddings out of commits.
+- Tune parameters in `robomaster_perception/config/perception.yaml`.
+- `tracking.launch.py` is the stable baseline. Enable depth and identity only after tracking is working.
+- If tracking works manually but not through launch, test nodes incrementally: tracker and overlay first, then depth, then identity.

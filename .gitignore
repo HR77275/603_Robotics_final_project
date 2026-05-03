@@ -4,3 +4,10 @@ log/
 *.pyc
 __pycache__/
 .ros/
+
+# Local/private face database material
+face_db/images/*
+face_db/embeddings/*
+!face_db/images/.gitkeep
+!face_db/embeddings/.gitkeep
+!face_db/README.md
