@@ -80,6 +80,43 @@ ros2 daemon stop
 ros2 daemon start
 ```
 
+
+## RoboMaster ROS Submodule
+
+This workspace uses `src/robomaster_ros` as a git submodule. The driver may need a small direct-IP connection patch so the environment variables below can be used reliably on networks where automatic discovery is unreliable:
+
+```bash
+export ROBOMASTER_LOCAL_IP=<laptop_or_host_ip>
+export ROBOMASTER_ROBOT_IP=<robot_ip>
+```
+
+Recommended setup for reproducibility:
+
+1. Fork `https://github.com/jeguzzi/robomaster_ros` into the project owner's GitHub account.
+2. Commit the direct-IP patch inside that fork.
+3. Point this workspace submodule to the fork and commit the submodule pointer in the parent repo.
+
+Fresh clone command:
+
+```bash
+git clone --recurse-submodules <project_repo_url>
+```
+
+If the repo was already cloned without submodules:
+
+```bash
+git submodule update --init --recursive
+```
+
+Check submodule state before pushing:
+
+```bash
+git submodule status
+git -C src/robomaster_ros status --short
+```
+
+The second command should be empty. If it shows modified files, commit them inside the `robomaster_ros` fork first, then commit the updated submodule pointer in this parent repo.
+
 ## Start The Robot Driver
 
 Run the driver first, with camera, person detection, and ToF enabled. Replace the placeholders with the local values for your robot/network.
