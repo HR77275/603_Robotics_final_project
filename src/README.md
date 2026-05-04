@@ -7,6 +7,7 @@ This `src/` folder contains the ROS 2 packages used for the RoboMaster EP percep
 - `robomaster_ros/`: upstream RoboMaster ROS driver package. Keep this as an external dependency or submodule.
 - `robomaster_perception_msgs/`: custom messages for tracked people, person depth, and identity results.
 - `robomaster_perception/`: perception nodes, launch files, and parameter config.
+- `robomaster_follow_controller/`: PID follow controller that consumes perception depth/tracking output and publishes `/cmd_vel`.
 - `robomaster_vision_overlay/`: earlier/simple overlay utility retained for reference.
 
 ## Main Topics
@@ -23,6 +24,7 @@ Outputs:
 - `/people/depth` (`robomaster_perception_msgs/msg/PeopleDepth`): depth estimate per tracked person.
 - `/people/identities` (`robomaster_perception_msgs/msg/PeopleIdentities`): optional face identity per track ID.
 - `/perception/tracking_debug_image` (`sensor_msgs/msg/Image`): camera feed with bbox, track ID, name, and depth overlay.
+- `/cmd_vel` (`geometry_msgs/msg/Twist`): follow controller velocity command output.
 
 
 ## Fresh Setup Dependencies
@@ -69,7 +71,7 @@ From the workspace root:
 ```bash
 cd ~/robomaster_ws
 source /opt/ros/humble/setup.bash
-colcon build --packages-select robomaster_perception_msgs robomaster_perception
+colcon build --packages-select robomaster_perception_msgs robomaster_perception robomaster_follow_controller
 source install/setup.bash
 ```
 
@@ -166,6 +168,51 @@ Start the full pipeline:
 ```bash
 ros2 launch robomaster_perception perception.launch.py use_depth:=true use_identity:=true
 ```
+
+
+## Follow Controller
+
+The follow controller is in `robomaster_follow_controller`. It subscribes to:
+
+- `/people/depth` (`robomaster_perception_msgs/msg/PeopleDepth`) for target depth and normalized bbox center.
+- `/perception/tracking_debug_image` (`sensor_msgs/msg/Image`) to stay synchronized with the annotated camera stream.
+
+It publishes:
+
+- `/cmd_vel` (`geometry_msgs/msg/Twist`) for chassis motion.
+
+Start it after the robot driver and perception pipeline are running:
+
+```bash
+ros2 launch robomaster_follow_controller follow.launch.py
+```
+
+Safer dry run, publishing only zero velocity commands while checking that the node starts:
+
+```bash
+ros2 launch robomaster_follow_controller follow.launch.py enable_motion:=false
+```
+
+Follow a specific track ID instead of the closest person:
+
+```bash
+ros2 launch robomaster_follow_controller follow.launch.py target_track_id:=3 target_distance_m:=1.5
+```
+
+Local controller test without the robot/perception stack:
+
+```bash
+# Terminal 1
+ros2 run robomaster_follow_controller fake_perception
+
+# Terminal 2
+ros2 launch robomaster_follow_controller follow.launch.py enable_motion:=false
+
+# Terminal 3
+ros2 topic echo /cmd_vel --once --no-daemon
+```
+
+Tune PID and speed limits in `robomaster_follow_controller/config/follow.yaml`.
 
 ## Face Identity Workflow
 
