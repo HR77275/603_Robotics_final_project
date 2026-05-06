@@ -1,3 +1,53 @@
+"""Integrated voice + follow-controller launch for robot day.
+
+This launch is the integration point between the voice lane (this package) and
+the camera/perception/follow lane on `feature/camera_detection`. It assumes the
+two branches have been merged and `colcon build` has been run for both
+packages in the same workspace.
+
+Pipeline started by this launch:
+
+    voice_intent_node  ->  /voice_intent
+                                |
+                                v
+                         behavior_fsm
+                                |
+                                v
+                  /follow_target_active (Bool)
+                                |
+                                v
+    [ teammate's follow_node ] ->  /cmd_vel_follow_raw
+                                |
+                                v
+                         cmd_vel_gate  ->  /cmd_vel  ->  robot wheels
+
+Integration contract enforced here:
+
+* The teammate's `follow_node` is spawned with `cmd_vel_topic` overridden to
+  `/cmd_vel_follow_raw` so the gate is the single writer of `/cmd_vel`.
+* `follow_enable_motion` defaults to False so the teammate node never drives
+  the chassis on its own when launched through this file.
+* `gate_enable_motion` defaults to False so even with the gate active and the
+  FSM in FOLLOWING, no Twist is forwarded until motion is explicitly enabled.
+
+To run the gated integration without final motion (safe dry-run):
+
+    ros2 launch cs603_voice_intent voice_integration_demo.launch.py \\
+        input_mode:=stdin \\
+        launch_follow_controller:=true \\
+        follow_enable_motion:=false \\
+        gate_enable_motion:=false
+
+To run the integration with the teammate node publishing real raw velocity but
+gate still blocking final motion (recommended pre-floor test):
+
+    ... follow_enable_motion:=true gate_enable_motion:=false
+
+Floor test only after the area is clear and emergency stop is ready:
+
+    ... follow_enable_motion:=true gate_enable_motion:=true
+"""
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition

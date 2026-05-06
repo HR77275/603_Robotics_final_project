@@ -139,13 +139,77 @@ Verified:
 - `/voice_intent` smoke: stdin phrase -> correct `CMD_*` published.
 - `/cmd_vel` gate smoke: raw Twist gated by FSM, `CMD_STOP` zeros instantly.
 - Web bridge smoke: `/api/transcribe` round-trip with `tiny.en`.
+- Local merge with `feature/camera_detection`: only `.gitignore` conflicts
+  (trivial union resolution); my `face_db/` ignore rules pre-folded so the
+  conflict surface is one set of overlapping lines.
 
 Not yet verified (needs robot day):
 
 - Live human voice reliability over a real microphone in the demo room.
 - Real robot floor motion through the gate.
 - Camera-follow integration end-to-end (depends on the
-  `feature/camera_detection` branch being merged).
+  `feature/camera_detection` branch being merged and `robomaster_ros`
+  submodule initialized).
+
+### Integrating with `feature/camera_detection`
+
+Branches forked from the same `main` commit. Coupling between my package and
+the perception/follow packages is **topic-level only**:
+
+- My `cmd_vel_gate` subscribes to `/cmd_vel_follow_raw` (Twist).
+- My integration launch spawns the teammate's `follow_node` with
+  `cmd_vel_topic` overridden to `/cmd_vel_follow_raw` so the gate is the
+  single writer of `/cmd_vel`.
+- My package.xml has zero build-time dependency on the teammate's packages.
+  Either package builds standalone in its own workspace.
+
+Merge sequence for whoever integrates:
+
+```bash
+git checkout main
+git pull
+git checkout -b integration/voice-and-camera
+git merge feature/camera_detection      # adds perception + follow + msgs
+git merge feature/whisper-web-bridge    # adds voice; .gitignore conflict only
+# resolve .gitignore as union of both rule sets
+git submodule update --init --recursive  # picks up robomaster_ros
+```
+
+Then build everything in the ROS Humble workspace:
+
+```bash
+colcon build --packages-select \
+    robomaster_perception_msgs \
+    robomaster_perception \
+    robomaster_follow_controller \
+    cs603_voice_intent
+source install/setup.bash
+```
+
+### What's still in progress (not in this PR)
+
+This PR is the voice lane core: voice -> intent -> FSM -> gate -> cmd_vel,
+plus the Mac-host Whisper web bridge. Planned follow-up work that is **not**
+in this PR — it lands in a separate branch off `main` after this merges:
+
+- **Mission-control web dashboard.** Extend `tools/voice_web_demo/` to also
+  consume teammate's perception output and render the robot's view in the
+  browser:
+  - Live camera feed with bbox overlay (`/perception/tracking_debug_image`).
+  - Tracked people list with names + distance
+    (`/people/tracks` + `/people/identities` + `/people/depth`).
+  - Live FSM state badge and last-heard transcript.
+  - Live `/cmd_vel` linear/angular bars.
+  - Big red E-STOP button (HTTP fallback alongside voice).
+  - Click-to-select follow target (sets `target_track_id` on `follow_node`).
+- **Whisper accuracy tuning.** Current default model is `base.en`. Bumping
+  to `small.en` or `medium.en` is an env-var change
+  (`CS603_WHISPER_MODEL=small.en`); no code edit. Decision pending after
+  live-mic test on demo hardware.
+
+Reviewers: please flag anything you'd like me to fix in this PR vs. defer to
+the dashboard branch. Issues unrelated to the voice-lane core are fair game
+to defer.
 
 ## Why ROS 2 Humble
 
