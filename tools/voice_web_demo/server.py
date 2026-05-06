@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Host-side web voice panel for the CS603 RoboMaster demo.
+"""WSL/Ubuntu web voice panel for the CS603 RoboMaster demo.
 
 The server has one safety boundary: it publishes std_msgs/String intents only.
 It never publishes /cmd_vel or starts the motion bridge.
@@ -21,13 +21,19 @@ from typing import Any
 from urllib.parse import urlparse
 
 
-WHISPER_BIN = os.environ.get("CS603_WHISPER_BIN", "/opt/homebrew/bin/whisper")
+WHISPER_BIN = os.environ.get("CS603_WHISPER_BIN", "whisper")
 WHISPER_MODEL = os.environ.get("CS603_WHISPER_MODEL", "base.en")
+DEFAULT_WORKSPACE = Path(os.environ.get("ROBOMASTER_WS", "~/robomaster_ws")).expanduser()
+DEFAULT_ROS_SETUP_FILES = (
+    "/opt/ros/humble/setup.bash",
+    os.environ.get("CS603_ROS_SETUP", str(DEFAULT_WORKSPACE / "install" / "setup.bash")),
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FRONTEND_PATH = Path(__file__).with_name("index.html")
-VOICE_PACKAGE_PATH = REPO_ROOT / "src" / "cs603_voice_intent"
+PYTHON_SHIMS_PATH = Path(__file__).with_name("python_shims")
+VOICE_PACKAGE_PATH = REPO_ROOT / "cs603_voice_intent"
 TOKEN_PLACEHOLDER = "__CS603_VOICE_DEMO_TOKEN__"
 
 sys.path.insert(0, str(VOICE_PACKAGE_PATH))
@@ -39,12 +45,12 @@ class VoiceIntentServer(ThreadingHTTPServer):
     def __init__(
         self,
         server_address: tuple[str, int],
-        container: str,
+        ros_setup_files: list[str],
         token: str,
         allow_lan_publish: bool = False,
     ) -> None:
         super().__init__(server_address, VoiceIntentHandler)
-        self.container = container
+        self.ros_setup_files = ros_setup_files
         self.token = token
         self.allow_lan_publish = allow_lan_publish
 
@@ -85,7 +91,7 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
                 raise ValueError("empty transcript")
 
             intent = classify_intent(command_text)
-            result = publish_intent(self.server.container, intent)
+            result = publish_intent(self.server.ros_setup_files, intent)
             self._send_json(
                 {
                     "ok": True,
@@ -137,7 +143,7 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
             if transcript:
                 intent = classify_intent(transcript)
                 try:
-                    result = publish_intent(self.server.container, intent)
+                    result = publish_intent(self.server.ros_setup_files, intent)
                     response.update(
                         {
                             "intent": intent,
@@ -166,20 +172,27 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
     def _health(self) -> dict[str, Any]:
         try:
             result = subprocess.run(
-                ["docker", "inspect", "-f", "{{.State.Running}}", self.server.container],
+                [
+                    "bash",
+                    "-lc",
+                    build_ros_shell_command(
+                        self.server.ros_setup_files,
+                        "ros2 pkg prefix cs603_voice_intent",
+                    ),
+                ],
                 text=True,
                 capture_output=True,
                 timeout=5,
                 check=False,
             )
-            ok = result.returncode == 0 and result.stdout.strip() == "true"
+            ok = result.returncode == 0
             return {
                 "ok": ok,
-                "container": self.server.container,
+                "ros_setup_files": self.server.ros_setup_files,
                 "error": "" if ok else (result.stderr or result.stdout).strip(),
             }
         except Exception as exc:  # noqa: BLE001 - demo health endpoint.
-            return {"ok": False, "container": self.server.container, "error": str(exc)}
+            return {"ok": False, "ros_setup_files": self.server.ros_setup_files, "error": str(exc)}
 
     def _send_json(self, payload: dict[str, Any], status: int = 200) -> None:
         data = json.dumps(payload).encode("utf-8")
@@ -197,17 +210,16 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
-def publish_intent(container: str, intent: str) -> subprocess.CompletedProcess[str]:
+def publish_intent(ros_setup_files: list[str], intent: str) -> subprocess.CompletedProcess[str]:
     if not intent.startswith("CMD_"):
         raise ValueError(f"refusing unexpected intent {intent!r}")
 
-    ros_command = (
-        "source /opt/ros/humble/setup.bash && "
-        "source /home/ubuntu/ros2_ws/install/setup.bash && "
-        f"ros2 topic pub --once /voice_intent std_msgs/msg/String '{{data: {intent}}}'"
+    ros_command = build_ros_shell_command(
+        ros_setup_files,
+        f"ros2 topic pub --once /voice_intent std_msgs/msg/String '{{data: {intent}}}'",
     )
     result = subprocess.run(
-        ["docker", "exec", container, "bash", "-lc", ros_command],
+        ["bash", "-lc", ros_command],
         text=True,
         capture_output=True,
         timeout=12,
@@ -216,6 +228,19 @@ def publish_intent(container: str, intent: str) -> subprocess.CompletedProcess[s
     if result.returncode != 0:
         raise RuntimeError((result.stderr or result.stdout).strip())
     return result
+
+
+def build_ros_shell_command(ros_setup_files: list[str], command: str) -> str:
+    source_parts = [
+        f"test -f {quote_shell(path)} && source {quote_shell(path)}"
+        for path in ros_setup_files
+        if path
+    ]
+    return " && ".join(source_parts + [command])
+
+
+def quote_shell(value: str) -> str:
+    return "'" + value.replace("'", "'\"'\"'") + "'"
 
 
 def publish_allowed(client_host: str, allow_lan_publish: bool) -> bool:
@@ -236,12 +261,13 @@ def request_is_authorized(headers: Any, expected_token: str) -> bool:
 
 
 def run_whisper(audio_path: str) -> str:
-    if not os.path.exists(WHISPER_BIN):
+    whisper_cmd = shutil.which(WHISPER_BIN) or (WHISPER_BIN if os.path.exists(WHISPER_BIN) else "")
+    if not whisper_cmd:
         raise RuntimeError(f"whisper binary not found at {WHISPER_BIN}")
     out_dir = tempfile.mkdtemp(prefix="cs603_whisper_out_")
     try:
         cmd = [
-            WHISPER_BIN,
+            whisper_cmd,
             audio_path,
             "--model", WHISPER_MODEL,
             "--language", "en",
@@ -255,7 +281,14 @@ def run_whisper(audio_path: str) -> str:
             "--output_format", "txt",
             "--verbose", "False",
         ]
-        result = subprocess.run(cmd, text=True, capture_output=True, timeout=60, check=False)
+        result = subprocess.run(
+            cmd,
+            text=True,
+            capture_output=True,
+            timeout=60,
+            check=False,
+            env=whisper_subprocess_env(),
+        )
         if result.returncode != 0:
             raise RuntimeError((result.stderr or result.stdout or "whisper failed").strip()[-1500:])
         base = os.path.splitext(os.path.basename(audio_path))[0]
@@ -275,13 +308,30 @@ def same_host_if_present(url: str | None, host: str) -> bool:
     return parsed.netloc == host
 
 
+def whisper_subprocess_env() -> dict[str, str]:
+    env = os.environ.copy()
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    pythonpath_parts = [str(PYTHON_SHIMS_PATH)]
+    if existing_pythonpath:
+        pythonpath_parts.append(existing_pythonpath)
+    env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
+    env.setdefault("NUMBA_JIT_COVERAGE", "0")
+    return env
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="CS603 voice web demo")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=int(os.environ.get("VOICE_WEB_PORT", "8765")))
     parser.add_argument(
-        "--container",
-        default=os.environ.get("CS603_ROS_CONTAINER", "cs603_robomaster_sdkports"),
+        "--ros-setup",
+        action="append",
+        default=[],
+        help=(
+            "ROS setup.bash to source before publishing. May be passed more than once. "
+            "Defaults to /opt/ros/humble/setup.bash and CS603_ROS_SETUP or "
+            "$ROBOMASTER_WS/install/setup.bash."
+        ),
     )
     parser.add_argument(
         "--allow-lan-publish",
@@ -292,9 +342,12 @@ def main() -> None:
     args = parser.parse_args()
 
     token = args.token or secrets.token_urlsafe(24)
-    server = VoiceIntentServer((args.host, args.port), args.container, token, args.allow_lan_publish)
+    ros_setup_files = args.ros_setup or [path for path in DEFAULT_ROS_SETUP_FILES if path]
+    server = VoiceIntentServer((args.host, args.port), ros_setup_files, token, args.allow_lan_publish)
     print(f"Voice web demo: http://{args.host}:{args.port}")
-    print(f"Publishing /voice_intent through Docker container: {args.container}")
+    print("Publishing /voice_intent with local ros2 CLI after sourcing:")
+    for path in ros_setup_files:
+        print(f"  {path}")
     if args.allow_lan_publish:
         print("LAN publish enabled for phone demo. Keep motion bridge disabled unless the test area is clear.")
     server.serve_forever()

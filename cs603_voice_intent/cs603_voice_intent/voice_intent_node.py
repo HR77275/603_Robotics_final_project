@@ -57,6 +57,10 @@ class VoiceIntentNode(Node):
         while rclpy.ok():
             line = sys.stdin.readline()
             if line == "":
+                self.get_logger().warn(
+                    "stdin closed; for interactive text input run this node with ros2 run, "
+                    "or use ros2 launch input_mode:=param and set stub_text."
+                )
                 return
             self._transcripts.put(line.strip())
 

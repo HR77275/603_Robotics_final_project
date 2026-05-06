@@ -1,5 +1,6 @@
 import subprocess
 import unittest
+from pathlib import Path
 from unittest import mock
 
 import server
@@ -56,10 +57,10 @@ class RequestAuthorizationTest(unittest.TestCase):
 class PublishIntentTest(unittest.TestCase):
     def test_rejects_non_intent_payload(self):
         with self.assertRaises(ValueError):
-            server.publish_intent("container", "follow me")
+            server.publish_intent(["/tmp/setup.bash"], "follow me")
 
     @mock.patch("server.subprocess.run")
-    def test_publishes_intent_through_docker_exec(self, run_mock):
+    def test_publishes_intent_through_local_ros2_cli(self, run_mock):
         run_mock.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=0,
@@ -67,26 +68,50 @@ class PublishIntentTest(unittest.TestCase):
             stderr="",
         )
 
-        result = server.publish_intent("cs603_robomaster_sdkports", "CMD_STOP")
+        result = server.publish_intent(
+            ["/opt/ros/humble/setup.bash", "/tmp/custom_robomaster_ws/install/setup.bash"],
+            "CMD_STOP",
+        )
 
         self.assertEqual(result.stdout, "published")
         run_mock.assert_called_once()
         args = run_mock.call_args.args[0]
-        self.assertEqual(args[:3], ["docker", "exec", "cs603_robomaster_sdkports"])
+        self.assertEqual(args[:2], ["bash", "-lc"])
         self.assertIn("/voice_intent", args[-1])
         self.assertIn("CMD_STOP", args[-1])
+        self.assertIn("/opt/ros/humble/setup.bash", args[-1])
+        self.assertIn("/tmp/custom_robomaster_ws/install/setup.bash", args[-1])
 
     @mock.patch("server.subprocess.run")
-    def test_surfaces_docker_publish_failure(self, run_mock):
+    def test_surfaces_ros2_publish_failure(self, run_mock):
         run_mock.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=1,
             stdout="",
-            stderr="docker failed",
+            stderr="ros2 failed",
         )
 
-        with self.assertRaisesRegex(RuntimeError, "docker failed"):
-            server.publish_intent("cs603_robomaster_sdkports", "CMD_STOP")
+        with self.assertRaisesRegex(RuntimeError, "ros2 failed"):
+            server.publish_intent(["/tmp/setup.bash"], "CMD_STOP")
+
+    def test_build_ros_shell_command_sources_setup_files(self):
+        command = server.build_ros_shell_command(
+            ["/opt/ros/humble/setup.bash", "/tmp/custom_robomaster_ws/install/setup.bash"],
+            "ros2 topic list",
+        )
+
+        self.assertIn("source '/opt/ros/humble/setup.bash'", command)
+        self.assertIn("source '/tmp/custom_robomaster_ws/install/setup.bash'", command)
+        self.assertTrue(command.endswith("ros2 topic list"))
+
+
+class WhisperEnvironmentTest(unittest.TestCase):
+    def test_whisper_env_prepends_python_shims(self):
+        env = server.whisper_subprocess_env()
+        first_pythonpath = env["PYTHONPATH"].split(":")[0]
+
+        self.assertEqual(Path(first_pythonpath).name, "python_shims")
+        self.assertEqual(env["NUMBA_JIT_COVERAGE"], "0")
 
 
 if __name__ == "__main__":

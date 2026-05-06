@@ -38,12 +38,13 @@ This project is glue code around existing RoboMaster and ROS voice-control patte
   recognition is required.
   - Repo: https://github.com/mgonzs13/whisper_ros
 
-## Browser Speech API
+## Browser Audio Capture
 
-- The current web demo uses `SpeechRecognition` when available and falls back to
-  phone keyboard dictation/manual text input when unavailable. MDN marks the API as
-  limited availability, so the fallback is required for iOS/Android reliability.
-  - Docs: https://developer.mozilla.org/en-US/docs/Web/API/SpeechRecognition
+- The current WSL web demo uses browser `MediaRecorder` to capture microphone
+  audio, posts that audio to the local Python server, and transcribes it with
+  OpenAI Whisper running locally in Ubuntu.
+  - MediaRecorder docs: https://developer.mozilla.org/en-US/docs/Web/API/MediaRecorder
+  - Whisper repo: https://github.com/openai/whisper
 
 ## Speaker Identification Out Of Scope
 

@@ -11,9 +11,24 @@ def generate_launch_description():
 
     return LaunchDescription(
         [
-            DeclareLaunchArgument("input_mode", default_value="stdin"),
-            DeclareLaunchArgument("enable_motion", default_value="false"),
-            DeclareLaunchArgument("stub_text", default_value=""),
+            DeclareLaunchArgument(
+                "input_mode",
+                default_value="param",
+                description=(
+                    "Input source for voice_intent_node. Use param with ros2 launch; "
+                    "stdin is intended for ros2 run in an interactive terminal."
+                ),
+            ),
+            DeclareLaunchArgument(
+                "enable_motion",
+                default_value="false",
+                description="Set true only for a cleared physical robot motion test.",
+            ),
+            DeclareLaunchArgument(
+                "stub_text",
+                default_value="",
+                description="Phrase to classify in param mode, e.g. 'follow me'.",
+            ),
             Node(
                 package="cs603_voice_intent",
                 executable="voice_intent_node",

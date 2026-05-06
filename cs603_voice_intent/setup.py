@@ -13,6 +13,13 @@ setup(
         (f"share/{package_name}/launch", glob("launch/*.launch.py")),
     ],
     install_requires=["setuptools"],
+    extras_require={
+        "whisper": [
+            "numpy",
+            "openai-whisper",
+            "sounddevice",
+        ],
+    },
     zip_safe=True,
     maintainer="CS603 Team",
     maintainer_email="soumikbhatta@example.com",

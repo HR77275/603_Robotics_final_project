@@ -18,6 +18,149 @@ References:
 - DJI RoboMaster EP
 - Workspace: `~/robomaster_ws`
 
+## CS603 Voice Intent Quick Start
+
+This section covers the current `cs603_voice_intent` package in a direct Ubuntu
+22.04 or WSL Ubuntu 22.04 setup. It assumes the repository is checked out at:
+
+```bash
+export ROBOMASTER_WS="${ROBOMASTER_WS:-$HOME/robomaster_ws}"
+export CS603_PROJECT="$ROBOMASTER_WS/src/603_Robotics_final_project"
+```
+
+### Requirements
+
+- Ubuntu 22.04 or WSL Ubuntu 22.04
+- ROS 2 Humble
+- Python 3.10
+- `colcon`
+- `geometry_msgs`, `std_msgs`, `rclpy`, `launch`, and `launch_ros`
+- Optional for microphone/Whisper testing: `ffmpeg`, `portaudio19-dev`,
+  `openai-whisper`, `sounddevice`, and `numpy`
+- Optional for physical robot motion: RoboMaster EP, `robomaster_ros`, robot
+  network access, and a clear test area with emergency stop ready
+
+### Install
+
+Install ROS/package tooling:
+
+```bash
+sudo apt update
+sudo apt install -y \
+  python3-colcon-common-extensions \
+  python3-pip \
+  ffmpeg \
+  portaudio19-dev \
+  ros-humble-geometry-msgs \
+  ros-humble-launch \
+  ros-humble-launch-ros \
+  ros-humble-rclpy \
+  ros-humble-std-msgs
+```
+
+Install optional Whisper dependencies:
+
+```bash
+python3 -m pip install --user --upgrade pip setuptools wheel
+python3 -m pip install --user openai-whisper sounddevice numpy
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+Build the voice package:
+
+```bash
+source /opt/ros/humble/setup.bash
+cd "$ROBOMASTER_WS"
+colcon build --packages-select cs603_voice_intent
+source "$ROBOMASTER_WS/install/setup.bash"
+```
+
+Every new terminal should source ROS and the workspace:
+
+```bash
+source /opt/ros/humble/setup.bash
+source "${ROBOMASTER_WS:-$HOME/robomaster_ws}/install/setup.bash"
+```
+
+### Run Text Tests
+
+Terminal 1:
+
+```bash
+ros2 topic echo /voice_intent
+```
+
+Terminal 2:
+
+```bash
+ros2 run cs603_voice_intent voice_intent_node --ros-args -p input_mode:=stdin
+```
+
+Type phrases such as:
+
+```text
+follow me
+stop
+come here
+```
+
+Expected intents are `CMD_FOLLOW`, `CMD_STOP`, and `CMD_APPROACH`.
+
+For `ros2 launch`, use parameter mode instead of typing into the launch
+terminal:
+
+```bash
+ros2 launch cs603_voice_intent voice_demo.launch.py input_mode:=param stub_text:="follow me"
+ros2 param set /voice_intent_node stub_text "stop"
+```
+
+### Run Whisper/Web Voice Demo
+
+Start the local WSL/Ubuntu web bridge:
+
+```bash
+cd "$CS603_PROJECT"
+source /opt/ros/humble/setup.bash
+source "$ROBOMASTER_WS/install/setup.bash"
+python3 tools/voice_web_demo/server.py --host 0.0.0.0 --port 8765 --allow-lan-publish --token cs603-demo-local
+```
+
+Open this in the Windows or Ubuntu browser:
+
+```text
+http://127.0.0.1:8765
+```
+
+The browser records audio, the WSL server runs local Whisper, and the server
+publishes classified intents on `/voice_intent`.
+
+Useful knobs:
+
+```bash
+CS603_WHISPER_MODEL=tiny.en python3 tools/voice_web_demo/server.py
+CS603_WHISPER_MODEL=base.en python3 tools/voice_web_demo/server.py
+CS603_ROS_SETUP="$ROBOMASTER_WS/install/setup.bash" python3 tools/voice_web_demo/server.py
+```
+
+### Run Physical Robot Demo
+
+Only enable motion after the RoboMaster driver is connected, the robot has room
+to move, and the emergency stop command is ready.
+
+```bash
+ros2 launch cs603_voice_intent voice_demo.launch.py input_mode:=param enable_motion:=true stub_text:="follow me"
+```
+
+Emergency stop:
+
+```bash
+ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{}" --once
+```
+
+More detailed voice notes live in
+[`docs/VOICE_INTENT_RUNBOOK.md`](docs/VOICE_INTENT_RUNBOOK.md).
+
 ## Install ROS 2 Humble
 
 ```bash
