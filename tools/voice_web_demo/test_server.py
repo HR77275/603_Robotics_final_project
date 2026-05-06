@@ -186,6 +186,57 @@ class TranscribePublishResponseTest(unittest.TestCase):
         self.assertEqual(response["publish_error"], "docker failed")
 
 
+class RosModeTest(unittest.TestCase):
+    @mock.patch("server.subprocess.run")
+    def test_publish_intent_docker_mode_uses_docker_exec(self, run_mock):
+        run_mock.return_value = subprocess.CompletedProcess([], 0, "ok", "")
+        server.publish_intent("my-container", "CMD_STOP", mode="docker")
+        argv = run_mock.call_args.args[0]
+        self.assertEqual(argv[:3], ["docker", "exec", "my-container"])
+
+    @mock.patch("server.subprocess.run")
+    def test_publish_intent_native_mode_skips_docker(self, run_mock):
+        run_mock.return_value = subprocess.CompletedProcess([], 0, "ok", "")
+        server.publish_intent("", "CMD_STOP", mode="native")
+        argv = run_mock.call_args.args[0]
+        self.assertEqual(argv[0], "bash")
+        self.assertNotIn("docker", argv[:2])
+        # Same bash command body in both modes.
+        self.assertIn("/voice_intent", argv[-1])
+        self.assertIn("CMD_STOP", argv[-1])
+
+    def test_publish_intent_rejects_unknown_mode(self):
+        with self.assertRaisesRegex(ValueError, "unknown ros_mode"):
+            server.publish_intent("c", "CMD_STOP", mode="kubernetes")
+
+    def test_resolve_ros_mode_auto_picks_docker_when_container_set(self):
+        self.assertEqual(server.resolve_ros_mode("auto", "my-container"), "docker")
+
+    def test_resolve_ros_mode_auto_picks_native_when_no_container(self):
+        self.assertEqual(server.resolve_ros_mode("auto", None), "native")
+        self.assertEqual(server.resolve_ros_mode("auto", ""), "native")
+
+    def test_resolve_ros_mode_explicit_overrides_auto(self):
+        self.assertEqual(server.resolve_ros_mode("native", "ignored"), "native")
+        self.assertEqual(server.resolve_ros_mode("docker", "x"), "docker")
+
+    @mock.patch("server.subprocess.run")
+    def test_native_health_reports_mode_and_setup_path(self, run_mock):
+        run_mock.return_value = subprocess.CompletedProcess([], 0, "/foo\n/bar", "")
+        result = server._native_ros_health()
+        self.assertEqual(result["mode"], "native")
+        self.assertTrue(result["ok"])
+        self.assertIn("ros_setup", result)
+
+    @mock.patch("server.subprocess.run")
+    def test_native_health_failure_surfaces_stderr(self, run_mock):
+        run_mock.return_value = subprocess.CompletedProcess([], 1, "", "ros2: command not found")
+        result = server._native_ros_health()
+        self.assertEqual(result["mode"], "native")
+        self.assertFalse(result["ok"])
+        self.assertIn("ros2", result["error"])
+
+
 class RosSetupPathTest(unittest.TestCase):
     @mock.patch("server.subprocess.run")
     def test_publish_intent_uses_configured_ros_setup_path(self, run_mock):

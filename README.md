@@ -8,6 +8,40 @@ This branch (`feature/whisper-web-bridge`) adds the voice control path. You spea
 into a microphone, the robot understands a small set of commands, and motion is
 routed safely so it does not fight the camera-follow controller.
 
+### Run on any laptop (one command)
+
+The web bridge auto-detects platform. Whoever has the robot connected runs:
+
+```bash
+bash tools/voice_web_demo/run_demo.sh
+```
+
+- **Linux** (Himanshu, native ROS Humble) → starts in `--ros-mode native`. No
+  Docker needed. Sources `$ROS_WS/install/setup.bash` or
+  `$HOME/robomaster_ws/install/setup.bash` (or `$HOME/ros2_ws/install/setup.bash`).
+- **macOS** (Soumik, Docker) → starts in `--ros-mode docker` against the
+  container `cs603_robomaster_sdkports` (override via `CS603_ROS_CONTAINER`).
+
+After it prints `Voice web demo: http://127.0.0.1:8765`, open that URL.
+The status pill in the header shows one of:
+
+| Pill                              | Meaning                                                      |
+| --------------------------------- | ------------------------------------------------------------ |
+| `ROBOT LINK OK (NATIVE \| DOCKER)`  | Bridge is up and ROS is reachable.                           |
+| `BRIDGE ALIVE, ROS DOWN (...)`     | Web is up but ROS workspace not sourced or container down.   |
+| `OFFLINE`                         | Browser can't reach the bridge at all.                       |
+
+Pre-reqs:
+
+```bash
+# macOS
+brew install openai-whisper ffmpeg
+
+# Ubuntu
+sudo apt install -y ffmpeg
+python3 -m pip install --user openai-whisper
+```
+
 ### What you can say
 
 | Phrase                 | Intent code      | Robot behavior                        |

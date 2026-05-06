@@ -78,11 +78,13 @@ class VoiceIntentServer(ThreadingHTTPServer):
         container: str,
         token: str,
         allow_lan_publish: bool = False,
+        ros_mode: str = "docker",
     ) -> None:
         super().__init__(server_address, VoiceIntentHandler)
         self.container = container
         self.token = token
         self.allow_lan_publish = allow_lan_publish
+        self.ros_mode = ros_mode  # "docker" or "native"
 
 
 class VoiceIntentHandler(BaseHTTPRequestHandler):
@@ -131,7 +133,7 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
 
             intent = classify_intent(command_text)
             speech = speech_for_intent(intent)
-            result = publish_intent(self.server.container, intent)
+            result = publish_intent(self.server.container, intent, mode=self.server.ros_mode)
             self._send_json(
                 {
                     "ok": True,
@@ -180,7 +182,13 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
             }
 
             if transcript:
-                response.update(publish_transcribed_text(self.server.container, transcript))
+                response.update(
+                    publish_transcribed_text(
+                        self.server.container,
+                        transcript,
+                        publish_func=lambda c, i: publish_intent(c, i, mode=self.server.ros_mode),
+                    )
+                )
 
             self._send_json(response, status=200 if response.get("ok", False) else 500)
         except Exception as exc:  # noqa: BLE001 - surface demo-time failures.
@@ -196,22 +204,9 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
         sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
 
     def _health(self) -> dict[str, Any]:
-        try:
-            result = subprocess.run(
-                ["docker", "inspect", "-f", "{{.State.Running}}", self.server.container],
-                text=True,
-                capture_output=True,
-                timeout=5,
-                check=False,
-            )
-            ok = result.returncode == 0 and result.stdout.strip() == "true"
-            return {
-                "ok": ok,
-                "container": self.server.container,
-                "error": "" if ok else (result.stderr or result.stdout).strip(),
-            }
-        except Exception as exc:  # noqa: BLE001 - demo health endpoint.
-            return {"ok": False, "container": self.server.container, "error": str(exc)}
+        if self.server.ros_mode == "native":
+            return _native_ros_health()
+        return _docker_ros_health(self.server.container)
 
     def _send_json(self, payload: dict[str, Any], status: int = 200) -> None:
         data = json.dumps(payload).encode("utf-8")
@@ -229,17 +224,37 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
-def publish_intent(container: str, intent: str) -> subprocess.CompletedProcess[str]:
+def publish_intent(
+    container: str,
+    intent: str,
+    *,
+    mode: str = "docker",
+) -> subprocess.CompletedProcess[str]:
+    """Publish a CMD_* intent to /voice_intent.
+
+    Two modes:
+      - "docker": run via `docker exec <container> bash -lc ...` (Soumik's Mac).
+      - "native": run via `bash -lc ...` directly on the host (Himanshu's Linux).
+
+    Both paths source /opt/ros/humble/setup.bash and the workspace pointed at
+    by $CS603_ROS_SETUP (default /home/ubuntu/ros2_ws/install/setup.bash).
+    """
     if intent not in ALLOWED_INTENTS:
         raise ValueError(f"refusing unexpected intent {intent!r}")
+    if mode not in ("docker", "native"):
+        raise ValueError(f"unknown ros_mode {mode!r}; use 'docker' or 'native'")
 
     ros_command = (
         "source /opt/ros/humble/setup.bash && "
         f"source {shlex.quote(ROS_SETUP_PATH)} && "
         f"ros2 topic pub --once /voice_intent std_msgs/msg/String '{{data: {intent}}}'"
     )
+    if mode == "docker":
+        argv = ["docker", "exec", container, "bash", "-lc", ros_command]
+    else:
+        argv = ["bash", "-lc", ros_command]
     result = subprocess.run(
-        ["docker", "exec", container, "bash", "-lc", ros_command],
+        argv,
         text=True,
         capture_output=True,
         timeout=12,
@@ -248,6 +263,51 @@ def publish_intent(container: str, intent: str) -> subprocess.CompletedProcess[s
     if result.returncode != 0:
         raise RuntimeError((result.stderr or result.stdout).strip())
     return result
+
+
+def _docker_ros_health(container: str) -> dict[str, Any]:
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.Running}}", container],
+            text=True,
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+        ok = result.returncode == 0 and result.stdout.strip() == "true"
+        return {
+            "ok": ok,
+            "mode": "docker",
+            "container": container,
+            "error": "" if ok else (result.stderr or result.stdout).strip(),
+        }
+    except Exception as exc:  # noqa: BLE001 - demo health endpoint.
+        return {"ok": False, "mode": "docker", "container": container, "error": str(exc)}
+
+
+def _native_ros_health() -> dict[str, Any]:
+    probe = (
+        "source /opt/ros/humble/setup.bash && "
+        f"source {shlex.quote(ROS_SETUP_PATH)} && "
+        "ros2 node list"
+    )
+    try:
+        result = subprocess.run(
+            ["bash", "-lc", probe],
+            text=True,
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+        ok = result.returncode == 0
+        return {
+            "ok": ok,
+            "mode": "native",
+            "ros_setup": ROS_SETUP_PATH,
+            "error": "" if ok else (result.stderr or result.stdout).strip(),
+        }
+    except Exception as exc:  # noqa: BLE001 - demo health endpoint.
+        return {"ok": False, "mode": "native", "ros_setup": ROS_SETUP_PATH, "error": str(exc)}
 
 
 def publish_transcribed_text(
@@ -376,13 +436,27 @@ def render_app_js(token: str) -> str:
     return APP_JS_PATH.read_text(encoding="utf-8").replace(TOKEN_PLACEHOLDER, token)
 
 
+def resolve_ros_mode(arg_mode: str, container: str | None) -> str:
+    """Resolve auto -> docker if a container was given, else native."""
+    if arg_mode == "auto":
+        return "docker" if container else "native"
+    return arg_mode
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="CS603 voice web demo")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=int(os.environ.get("VOICE_WEB_PORT", "8765")))
     parser.add_argument(
         "--container",
-        default=os.environ.get("CS603_ROS_CONTAINER", "cs603_robomaster_sdkports"),
+        default=os.environ.get("CS603_ROS_CONTAINER"),
+        help="Docker container name to publish through. Omit for native ROS publish.",
+    )
+    parser.add_argument(
+        "--ros-mode",
+        choices=("auto", "docker", "native"),
+        default=os.environ.get("CS603_ROS_MODE", "auto"),
+        help="auto picks docker if --container is set, else native (host ros2).",
     )
     parser.add_argument(
         "--allow-lan-publish",
@@ -393,9 +467,22 @@ def main() -> None:
     args = parser.parse_args()
 
     token = args.token or secrets.token_urlsafe(24)
-    server = VoiceIntentServer((args.host, args.port), args.container, token, args.allow_lan_publish)
+    ros_mode = resolve_ros_mode(args.ros_mode, args.container)
+    container = args.container or ""
+    if ros_mode == "docker" and not container:
+        parser.error("--ros-mode=docker requires --container <name>")
+    server = VoiceIntentServer(
+        (args.host, args.port),
+        container,
+        token,
+        args.allow_lan_publish,
+        ros_mode=ros_mode,
+    )
     print(f"Voice web demo: http://{args.host}:{args.port}")
-    print(f"Publishing /voice_intent through Docker container: {args.container}")
+    if ros_mode == "docker":
+        print(f"Publishing /voice_intent through Docker container: {container}")
+    else:
+        print(f"Publishing /voice_intent natively. ROS setup: {ROS_SETUP_PATH}")
     if args.allow_lan_publish:
         print(
             "LAN publish enabled. This is not strong authentication; keep final motion "

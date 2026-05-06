@@ -113,17 +113,36 @@ function speak(text) {
   window.speechSynthesis.speak(utterance);
 }
 
+let lastHealthError = "";
+
 async function health() {
+  // Don't clobber an in-progress transient status (RECORDING, TRANSCRIBING, LIVE).
+  // Those use the "dots" class on the same pill.
+  if (statusEl.classList.contains("dots")) return;
   try {
     const res = await fetch("/api/health");
     const data = await res.json();
-    statusEl.textContent = data.ok ? "ROS READY" : "BRIDGE ERROR";
-    statusEl.style.color = data.ok ? "var(--green)" : "var(--red)";
-    if (!data.ok) log(data.error || "health check failed");
+    const modeLabel = data.mode ? data.mode.toUpperCase() : "UNKNOWN";
+    if (data.ok) {
+      statusEl.textContent = `ROBOT LINK OK (${modeLabel})`;
+      statusEl.style.color = "var(--green)";
+    } else {
+      statusEl.textContent = `BRIDGE ALIVE, ROS DOWN (${modeLabel})`;
+      statusEl.style.color = "var(--yellow, #d4a017)";
+      const err = data.error || "ROS unreachable";
+      if (err !== lastHealthError) {
+        log(err);
+        lastHealthError = err;
+      }
+    }
   } catch (error) {
     statusEl.textContent = "OFFLINE";
     statusEl.style.color = "var(--red)";
-    log(String(error));
+    const err = String(error);
+    if (err !== lastHealthError) {
+      log(err);
+      lastHealthError = err;
+    }
   }
 }
 
@@ -402,3 +421,4 @@ if (liveEl) {
 }
 
 health();
+setInterval(health, 3000);

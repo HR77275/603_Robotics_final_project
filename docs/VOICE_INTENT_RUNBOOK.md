@@ -160,6 +160,31 @@ ros2 run cs603_voice_intent voice_intent_node --ros-args -p input_mode:=mic_once
 
 Docker Desktop may not expose the Mac microphone to the Linux container. If `mic_once` fails with no audio device, use `stdin` mode for robot-day testing or use the Mac-host web bridge below.
 
+### Native (Linux) ROS publish
+
+Himanshu (or anyone on Ubuntu 22.04 with ROS Humble built natively) skips Docker:
+
+```bash
+bash tools/voice_web_demo/run_demo.sh
+```
+
+The launcher detects Linux and starts the bridge with `--ros-mode native`. It
+sources `$ROS_WS/install/setup.bash` or falls back to
+`$HOME/robomaster_ws/install/setup.bash` (or `$HOME/ros2_ws/install/setup.bash`).
+Override explicitly with `CS603_ROS_SETUP=/full/path/to/install/setup.bash`.
+
+Manual equivalent if you don't want the launcher:
+
+```bash
+CS603_ROS_SETUP=$HOME/robomaster_ws/install/setup.bash \
+  python3 tools/voice_web_demo/server.py \
+    --host 127.0.0.1 --port 8765 --ros-mode native
+```
+
+The browser pill reads `ROBOT LINK OK (NATIVE)` once `ros2 node list` runs
+without error in the bridge's environment. If it reads `BRIDGE ALIVE, ROS DOWN
+(NATIVE)`, the workspace was not sourced — fix `CS603_ROS_SETUP` and refresh.
+
 ### B. Mac-host web bridge (recommended for live demo)
 
 `tools/voice_web_demo/server.py` exposes `/api/transcribe`. The browser records audio with MediaRecorder, posts the blob to the Mac, the Mac runs `/opt/homebrew/bin/whisper` locally (no API key required), classifies the intent, publishes on `/voice_intent` through the Docker container, and speaks a short browser ACK.
