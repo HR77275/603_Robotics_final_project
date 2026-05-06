@@ -1,9 +1,9 @@
 """Behavior FSM consuming /voice_intent and publishing /behavior_state.
 
 States: IDLE, FOLLOWING, STOPPED, APPROACHING.
-Default is safe: no /cmd_vel published. PID follow controller (separate node)
-subscribes to /follow_target which this FSM publishes only when FOLLOWING or
-APPROACHING. Optional speaker ACK via /sound/play_sound_id service.
+Default is safe: no /cmd_vel published. The follow controller/gate reads
+/follow_target_active, which is true only while the state is FOLLOWING or
+APPROACHING.
 """
 
 from __future__ import annotations
@@ -53,19 +53,20 @@ class BehaviorFsm(Node):
         self.declare_parameter("state_topic", "/behavior_state")
         self.declare_parameter("follow_active_topic", "/follow_target_active")
         self.declare_parameter("initial_state", STATE_IDLE)
-        self.declare_parameter("publish_unknown_state", False)
+        self.declare_parameter("heartbeat_period_sec", 0.25)
 
         intent_topic = str(self.get_parameter("intent_topic").value)
         state_topic = str(self.get_parameter("state_topic").value)
         follow_active_topic = str(self.get_parameter("follow_active_topic").value)
         self.state: str = str(self.get_parameter("initial_state").value)
-        self.publish_unknown_state = bool(self.get_parameter("publish_unknown_state").value)
+        heartbeat_period_sec = float(self.get_parameter("heartbeat_period_sec").value)
 
         self._intent_sub = self.create_subscription(
             String, intent_topic, self._on_intent, 10
         )
         self._state_pub = self.create_publisher(String, state_topic, 10)
         self._follow_active_pub = self.create_publisher(Bool, follow_active_topic, 10)
+        self._heartbeat = self.create_timer(heartbeat_period_sec, self._on_heartbeat)
         self._publish_state(reason="startup")
 
         self.get_logger().info(
@@ -104,6 +105,13 @@ class BehaviorFsm(Node):
             f"published state={self.state} follow_active={active.data} reason={reason}"
         )
 
+    def _on_heartbeat(self) -> None:
+        self._publish_state(reason="heartbeat")
+
+    def stop(self) -> None:
+        self.state = STATE_STOPPED
+        self._publish_state(reason="shutdown")
+
 
 def main(args=None) -> None:
     rclpy.init(args=args)
@@ -111,6 +119,7 @@ def main(args=None) -> None:
 
     def _shutdown(signum, _frame):
         node.get_logger().warn(f"signal {signum} received; shutting down FSM")
+        node.stop()
         if rclpy.ok():
             rclpy.shutdown()
 
@@ -120,6 +129,8 @@ def main(args=None) -> None:
     try:
         rclpy.spin(node)
     finally:
+        if rclpy.ok():
+            node.stop()
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

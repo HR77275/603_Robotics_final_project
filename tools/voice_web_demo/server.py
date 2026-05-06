@@ -23,16 +23,30 @@ from urllib.parse import urlparse
 
 WHISPER_BIN = os.environ.get("CS603_WHISPER_BIN", "/opt/homebrew/bin/whisper")
 WHISPER_MODEL = os.environ.get("CS603_WHISPER_MODEL", "base.en")
+MAX_AUDIO_UPLOAD_BYTES = int(os.environ.get("CS603_MAX_AUDIO_UPLOAD_BYTES", str(12 * 1024 * 1024)))
+MAX_JSON_UPLOAD_BYTES = int(os.environ.get("CS603_MAX_JSON_UPLOAD_BYTES", "4096"))
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FRONTEND_PATH = Path(__file__).with_name("index.html")
+STYLE_PATH = Path(__file__).with_name("style.css")
+APP_JS_PATH = Path(__file__).with_name("app.js")
 VOICE_PACKAGE_PATH = REPO_ROOT / "src" / "cs603_voice_intent"
 TOKEN_PLACEHOLDER = "__CS603_VOICE_DEMO_TOKEN__"
 
 sys.path.insert(0, str(VOICE_PACKAGE_PATH))
 
-from cs603_voice_intent.intent_classifier import classify_intent  # noqa: E402
+from cs603_voice_intent.intent_classifier import (  # noqa: E402
+    CMD_APPROACH,
+    CMD_FOLLOW,
+    CMD_STOP,
+    CMD_UNKNOWN,
+    classify_intent,
+)
+from cs603_voice_intent.speech_responses import speech_for_intent  # noqa: E402
+
+
+ALLOWED_INTENTS = {CMD_APPROACH, CMD_FOLLOW, CMD_STOP, CMD_UNKNOWN}
 
 
 class VoiceIntentServer(ThreadingHTTPServer):
@@ -53,20 +67,29 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
     server: VoiceIntentServer
 
     def do_GET(self) -> None:  # noqa: N802
-        if self.path == "/":
-            page = FRONTEND_PATH.read_text(encoding="utf-8").replace(TOKEN_PLACEHOLDER, self.server.token)
+        path = request_path(self.path)
+        if path == "/":
+            page = render_index_html(self.server.token)
             self._send_bytes(page.encode("utf-8"), "text/html; charset=utf-8")
             return
-        if self.path == "/api/health":
+        if path == "/static/style.css":
+            self._send_bytes(STYLE_PATH.read_bytes(), "text/css; charset=utf-8")
+            return
+        if path == "/static/app.js":
+            script = render_app_js(self.server.token)
+            self._send_bytes(script.encode("utf-8"), "application/javascript; charset=utf-8")
+            return
+        if path == "/api/health":
             self._send_json(self._health())
             return
         self.send_error(404)
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path == "/api/intent":
+        path = request_path(self.path)
+        if path == "/api/intent":
             self._handle_intent()
             return
-        if self.path == "/api/transcribe":
+        if path == "/api/transcribe":
             self._handle_transcribe()
             return
         self.send_error(404)
@@ -78,13 +101,14 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
             if not publish_allowed(self.client_address[0], self.server.allow_lan_publish):
                 raise PermissionError("LAN publish disabled; restart with --allow-lan-publish for phone demos")
 
-            body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            body = self.rfile.read(parse_json_content_length(self.headers))
             payload = json.loads(body.decode("utf-8"))
             command_text = str(payload.get("transcript", "")).strip()
             if not command_text:
                 raise ValueError("empty transcript")
 
             intent = classify_intent(command_text)
+            speech = speech_for_intent(intent)
             result = publish_intent(self.server.container, intent)
             self._send_json(
                 {
@@ -92,12 +116,13 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
                     "transcript": command_text,
                     "commandText": command_text,
                     "intent": intent,
+                    "speech": speech,
                     "stdout": result.stdout[-2000:],
                     "stderr": result.stderr[-2000:],
                 }
             )
         except Exception as exc:  # noqa: BLE001 - expose demo-time failures.
-            self._send_json({"ok": False, "error": str(exc)}, status=500)
+            self._send_json({"ok": False, "error": str(exc)}, status=status_for_exception(exc))
 
     def _handle_transcribe(self) -> None:
         tmp_audio = ""
@@ -107,9 +132,7 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
             if not publish_allowed(self.client_address[0], self.server.allow_lan_publish):
                 raise PermissionError("LAN publish disabled; restart with --allow-lan-publish for phone demos")
 
-            length = int(self.headers.get("Content-Length", "0"))
-            if length <= 0:
-                raise ValueError("empty audio body")
+            length = parse_audio_content_length(self.headers)
             data = self.rfile.read(length)
 
             ext = ".webm"
@@ -135,24 +158,11 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
             }
 
             if transcript:
-                intent = classify_intent(transcript)
-                try:
-                    result = publish_intent(self.server.container, intent)
-                    response.update(
-                        {
-                            "intent": intent,
-                            "commandText": transcript,
-                            "stdout": result.stdout[-2000:],
-                            "stderr": result.stderr[-2000:],
-                        }
-                    )
-                except Exception as pub_exc:  # noqa: BLE001 - keep transcript visible even if ROS publish fails
-                    response["intent"] = intent
-                    response["publish_error"] = str(pub_exc)
+                response.update(publish_transcribed_text(self.server.container, transcript))
 
-            self._send_json(response)
+            self._send_json(response, status=200 if response.get("ok", False) else 500)
         except Exception as exc:  # noqa: BLE001 - surface demo-time failures.
-            self._send_json({"ok": False, "error": str(exc)}, status=500)
+            self._send_json({"ok": False, "error": str(exc)}, status=status_for_exception(exc))
         finally:
             if tmp_audio and os.path.exists(tmp_audio):
                 try:
@@ -198,7 +208,7 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
 
 
 def publish_intent(container: str, intent: str) -> subprocess.CompletedProcess[str]:
-    if not intent.startswith("CMD_"):
+    if intent not in ALLOWED_INTENTS:
         raise ValueError(f"refusing unexpected intent {intent!r}")
 
     ros_command = (
@@ -218,8 +228,69 @@ def publish_intent(container: str, intent: str) -> subprocess.CompletedProcess[s
     return result
 
 
+def publish_transcribed_text(
+    container: str,
+    transcript: str,
+    publish_func=publish_intent,
+) -> dict[str, Any]:
+    intent = classify_intent(transcript)
+    speech = speech_for_intent(intent)
+    response: dict[str, Any] = {
+        "ok": True,
+        "intent": intent,
+        "commandText": transcript,
+        "speech": speech,
+    }
+    try:
+        result = publish_func(container, intent)
+    except Exception as pub_exc:  # noqa: BLE001 - keep transcript visible even if ROS publish fails
+        response["ok"] = False
+        response["publish_error"] = str(pub_exc)
+        return response
+
+    response["stdout"] = result.stdout[-2000:]
+    response["stderr"] = result.stderr[-2000:]
+    return response
+
+
+def parse_audio_content_length(headers: Any, max_bytes: int = MAX_AUDIO_UPLOAD_BYTES) -> int:
+    try:
+        length = int(headers.get("Content-Length", "0"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid audio body length") from exc
+    if length <= 0:
+        raise ValueError("empty audio body")
+    if length > max_bytes:
+        raise ValueError(f"audio body too large: {length} > {max_bytes} bytes")
+    return length
+
+
+def parse_json_content_length(headers: Any, max_bytes: int = MAX_JSON_UPLOAD_BYTES) -> int:
+    try:
+        length = int(headers.get("Content-Length", "0"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid json body length") from exc
+    if length <= 0:
+        raise ValueError("empty json body")
+    if length > max_bytes:
+        raise ValueError(f"json body too large: {length} > {max_bytes} bytes")
+    return length
+
+
 def publish_allowed(client_host: str, allow_lan_publish: bool) -> bool:
     return allow_lan_publish or client_host == "::1" or client_host.startswith("127.")
+
+
+def request_path(raw_path: str) -> str:
+    return urlparse(raw_path).path
+
+
+def status_for_exception(exc: Exception) -> int:
+    if isinstance(exc, PermissionError):
+        return 403
+    if isinstance(exc, (json.JSONDecodeError, ValueError)):
+        return 400
+    return 500
 
 
 def token_header_ok(headers: Any, expected_token: str) -> bool:
@@ -275,6 +346,14 @@ def same_host_if_present(url: str | None, host: str) -> bool:
     return parsed.netloc == host
 
 
+def render_index_html(token: str) -> str:
+    return FRONTEND_PATH.read_text(encoding="utf-8").replace(TOKEN_PLACEHOLDER, token)
+
+
+def render_app_js(token: str) -> str:
+    return APP_JS_PATH.read_text(encoding="utf-8").replace(TOKEN_PLACEHOLDER, token)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="CS603 voice web demo")
     parser.add_argument("--host", default="127.0.0.1")
@@ -296,7 +375,10 @@ def main() -> None:
     print(f"Voice web demo: http://{args.host}:{args.port}")
     print(f"Publishing /voice_intent through Docker container: {args.container}")
     if args.allow_lan_publish:
-        print("LAN publish enabled for phone demo. Keep motion bridge disabled unless the test area is clear.")
+        print(
+            "LAN publish enabled. This is not strong authentication; keep final motion "
+            "disabled unless the test area is clear. Browser mic over LAN also needs HTTPS."
+        )
     server.serve_forever()
 
 

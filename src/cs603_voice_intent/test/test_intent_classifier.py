@@ -26,6 +26,10 @@ class IntentClassifierTest(unittest.TestCase):
         self.assertEqual(classify_intent("come along"), CMD_FOLLOW)
         self.assertEqual(classify_intent("green light"), CMD_FOLLOW)
 
+    def test_ambiguous_short_words_are_unknown(self):
+        self.assertEqual(classify_intent("go"), CMD_UNKNOWN)
+        self.assertEqual(classify_intent("resume"), CMD_UNKNOWN)
+
     def test_unknown(self):
         self.assertEqual(classify_intent("bring me coffee"), CMD_UNKNOWN)
 

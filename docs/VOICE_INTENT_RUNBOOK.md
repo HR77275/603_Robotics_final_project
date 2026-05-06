@@ -4,9 +4,15 @@ This package is Soumik's CS603 final-project lane: spoken command text becomes R
 
 ## Build In The Humble Container
 
+Robot-day rule: verify the live container name and ROS workspace path before
+copying, building, or publishing. On this Mac, the verified current container is
+`cs603_robomaster_sdkports`; the older `cs603_robomaster` container is stopped.
+Use one container for robot-day work unless the team explicitly rebuilds the
+environment. The examples below use `cs603_robomaster_sdkports` and `~/ros2_ws`.
+
 ```bash
-docker cp src/cs603_voice_intent cs603_robomaster:/home/ubuntu/ros2_ws/src/
-docker exec -it cs603_robomaster bash
+docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+docker exec -it cs603_robomaster_sdkports bash
 source /opt/ros/humble/setup.bash
 cd /home/ubuntu/ros2_ws
 colcon build --packages-select cs603_voice_intent
@@ -43,9 +49,14 @@ CMD_STOP
 CMD_APPROACH
 ```
 
-## Robot Motion Demo
+## Legacy Direct Motion Demo
 
-Only run this after the robot is connected, the area is clear, and emergency stop is ready.
+This launches the old direct voice-to-`/cmd_vel` bridge. Keep it for isolated
+voice package testing only. Do not use it in the integrated camera-follow path
+because the follow controller also publishes velocity commands.
+
+Only run this after the robot is connected, the area is clear, and emergency
+stop is ready.
 
 ```bash
 ros2 launch cs603_voice_intent voice_demo.launch.py input_mode:=stdin enable_motion:=true
@@ -63,6 +74,80 @@ Emergency stop:
 ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{}" --once
 ```
 
+## Integrated Follow Gate Demo
+
+Use this path when Himanshu's follow controller is present. It routes the follow
+controller to `/cmd_vel_follow_raw` and lets Soumik's gate publish final
+`/cmd_vel`.
+
+Safe dry-run, no final motion:
+
+```bash
+ros2 launch cs603_voice_intent voice_integration_demo.launch.py \
+  input_mode:=stdin \
+  launch_follow_controller:=false \
+  gate_enable_motion:=false
+```
+
+After the camera/follow packages are available, launch the follow controller
+through the gate:
+
+```bash
+ros2 launch cs603_voice_intent voice_integration_demo.launch.py \
+  input_mode:=stdin \
+  launch_follow_controller:=true \
+  follow_enable_motion:=true \
+  gate_enable_motion:=false
+```
+
+For a lifted-robot or floor test only after the area is clear, switch the final
+gate on:
+
+```bash
+ros2 launch cs603_voice_intent voice_integration_demo.launch.py \
+  input_mode:=stdin \
+  launch_follow_controller:=true \
+  follow_enable_motion:=true \
+  gate_enable_motion:=true
+```
+
+Topic checklist:
+
+```bash
+ros2 topic echo /voice_intent
+ros2 topic echo /follow_target_active
+ros2 topic echo /people/depth
+ros2 topic echo /cmd_vel_follow_raw
+ros2 topic echo /cmd_vel
+ros2 topic echo /robot_speech
+```
+
+Manual dry-run without the camera package:
+
+Terminal 1:
+
+```bash
+ros2 run cs603_voice_intent behavior_fsm
+```
+
+Terminal 2:
+
+```bash
+ros2 run cs603_voice_intent cmd_vel_gate --ros-args -p enable_motion:=false
+```
+
+Terminal 3:
+
+```bash
+ros2 topic pub --once /voice_intent std_msgs/msg/String "{data: CMD_FOLLOW}"
+ros2 topic pub --once /cmd_vel_follow_raw geometry_msgs/msg/Twist "{linear: {x: 0.05}}"
+ros2 topic pub --once /voice_intent std_msgs/msg/String "{data: CMD_STOP}"
+```
+
+Expected result with `enable_motion:=false`: `/cmd_vel` remains zero. With
+`enable_motion:=true` and `/follow_target_active` true, fresh raw Twist messages
+pass through. `CMD_STOP` must immediately zero `/cmd_vel`.
+
 ## Whisper Mode
 
 Two ways to run Whisper. Pick one.
@@ -77,15 +162,25 @@ Docker Desktop may not expose the Mac microphone to the Linux container. If `mic
 
 ### B. Mac-host web bridge (recommended for live demo)
 
-`tools/voice_web_demo/server.py` exposes `/api/transcribe`. The browser records audio with MediaRecorder, posts the blob to the Mac, the Mac runs `/opt/homebrew/bin/whisper` locally (no API key required), classifies the intent, and publishes on `/voice_intent` through the Docker container.
+`tools/voice_web_demo/server.py` exposes `/api/transcribe`. The browser records audio with MediaRecorder, posts the blob to the Mac, the Mac runs `/opt/homebrew/bin/whisper` locally (no API key required), classifies the intent, publishes on `/voice_intent` through the Docker container, and speaks a short browser ACK.
 
 ```bash
 brew install openai-whisper ffmpeg
-python3 tools/voice_web_demo/server.py --host 0.0.0.0 --port 8765 --allow-lan-publish --token cs603-demo-local
+python3 tools/voice_web_demo/server.py --host 127.0.0.1 --port 8765 --container cs603_robomaster_sdkports
 open http://127.0.0.1:8765
 ```
 
-In the UI, click `Whisper: tap to record`, speak, click again to stop. Transcript appears, intent publishes automatically. The `Talk` / `Always off` buttons keep the browser-native Web Speech API path as a backup for environments where MediaRecorder is unavailable.
+Use `--host 0.0.0.0 --allow-lan-publish` only when a teammate device must reach
+the bridge and final robot motion is disabled, or after the test area is clear
+and the emergency stop is ready. This flag is not strong authentication: any
+LAN client that can load the page receives the demo token. Browser microphone
+capture over LAN also requires HTTPS; for normal voice testing, use Comet on
+the Mac at `http://127.0.0.1:8765`.
+
+In the UI, click `Tap to listen` for continuous voice mode. For a cleaner
+single-utterance test, open `Settings`, click `Whisper: tap to record`, speak,
+then click again to stop. Transcript appears, intent publishes automatically,
+and the browser speaks a short ACK.
 
 Configure model + binary via env vars if needed:
 

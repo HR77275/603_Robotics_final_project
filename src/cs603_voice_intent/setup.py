@@ -24,6 +24,8 @@ setup(
             "voice_cmd_vel_bridge = cs603_voice_intent.voice_cmd_vel_bridge:main",
             "object_trigger_stub = cs603_voice_intent.object_trigger_stub:main",
             "behavior_fsm = cs603_voice_intent.behavior_fsm:main",
+            "cmd_vel_gate = cs603_voice_intent.cmd_vel_gate:main",
+            "robot_response_node = cs603_voice_intent.robot_response_node:main",
         ],
     },
 )

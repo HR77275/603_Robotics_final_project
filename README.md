@@ -2,6 +2,151 @@
 
 This project uses a DJI RoboMaster EP with ROS 2 Humble on Ubuntu 22.04. It documents how to install the ROS driver, connect to the robot over Wi-Fi, view the camera stream, teleoperate the chassis, and control the arm/gripper.
 
+## Voice Intent Lane (Soumik)
+
+This branch (`feature/whisper-web-bridge`) adds the voice control path. You speak
+into a microphone, the robot understands a small set of commands, and motion is
+routed safely so it does not fight the camera-follow controller.
+
+### What you can say
+
+| Phrase                 | Intent code      | Robot behavior                        |
+| ---------------------- | ---------------- | ------------------------------------- |
+| "follow me", "come"    | `CMD_FOLLOW`     | enter follow mode (gate opens)        |
+| "stop", "freeze"       | `CMD_STOP`       | zero `/cmd_vel` immediately           |
+| "come here"            | `CMD_APPROACH`   | short forward nudge                   |
+| (anything else)        | `CMD_UNKNOWN`    | ignored, no motion                    |
+
+### Pipeline at a glance
+
+```
+[ Browser mic ]                              [ Mac host ]
+      |                                           |
+      | MediaRecorder blob (POST /api/transcribe) |
+      | -----------------------------------------> |
+      |                                           |
+      |                                  /opt/homebrew/bin/whisper
+      |                                  (local, no API key)
+      |                                           |
+      |                                  intent_classifier.py
+      |                                  -> CMD_FOLLOW / CMD_STOP / ...
+      |                                           |
+      |                                  docker exec ros2 topic pub
+      |                                           v
+      |                                   ROS 2 Humble container
+      |                                           |
+      |                                   /voice_intent (std_msgs/String)
+      |                                           |
+      |                                   behavior_fsm
+      |                                  (state: idle | follow | stopped)
+      |                                           |
+      |                          /follow_target_active (Bool)
+      |                                           |
+      |                                   cmd_vel_gate
+      |  raw follow Twist  ->  /cmd_vel_follow_raw  ->  gate  ->  /cmd_vel
+      |                                           |
+      | (browser ACK: "Following you" / "Stopping") <-- /robot_speech
+      | <----------------------------------------- |
+```
+
+Topics in one line:
+
+```
+voice -> /voice_intent -> behavior_fsm -> /follow_target_active
+follow controller -> /cmd_vel_follow_raw -> cmd_vel_gate -> /cmd_vel
+```
+
+### Why a gate?
+
+The camera-follow node also publishes velocity. If both it and the voice node
+wrote to `/cmd_vel`, they would fight. The gate is the single writer of
+`/cmd_vel`. It only forwards the follow controller's raw Twist when:
+
+1. `behavior_fsm` says follow is active (after a `CMD_FOLLOW`), AND
+2. a fresh raw Twist has arrived recently (stale messages are dropped), AND
+3. `enable_motion` is true (default off; opt in only on robot day).
+
+Any `CMD_STOP` immediately zeros `/cmd_vel` regardless of state.
+
+### What's in this lane
+
+```
+src/cs603_voice_intent/
+  cs603_voice_intent/
+    voice_intent_node.py     # stdin or whisper -> /voice_intent
+    intent_classifier.py     # text -> CMD_* code
+    behavior_fsm.py          # /voice_intent -> /follow_target_active
+    cmd_vel_gate.py          # gates final /cmd_vel
+    robot_response_node.py   # /voice_intent -> /robot_speech text
+    speech_responses.py      # phrase table
+  launch/
+    voice_demo.launch.py             # legacy direct voice -> /cmd_vel
+    voice_integration_demo.launch.py # gated integration with follow lane
+  test/                              # 50+ unit tests, all passing
+
+tools/voice_web_demo/
+  server.py        # Mac-host /api/transcribe + /api/intent endpoints
+  index.html       # tap-to-listen / Live VAD UI, ACK speech
+  app.js, style.css
+  test_*.py        # bridge + synthetic audio coverage
+```
+
+### Run the tests (no ROS needed)
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 \
+  PYTHONPATH=src/cs603_voice_intent:tools/voice_web_demo \
+  python3 -m pytest -p no:cacheprovider -q
+```
+
+Expected: `68 passed`.
+
+### Run the host web bridge (live demo)
+
+```bash
+brew install openai-whisper ffmpeg
+PYTHONPATH=src/cs603_voice_intent:tools/voice_web_demo \
+  python3 tools/voice_web_demo/server.py \
+    --host 127.0.0.1 --port 8765 \
+    --container cs603_robomaster_sdkports
+open http://127.0.0.1:8765
+```
+
+Tap `Tap to listen`, speak a phrase, see the transcript and intent. The bridge
+publishes to `/voice_intent` inside the running ROS Humble container.
+
+### Build inside the ROS Humble container
+
+```bash
+docker exec -it cs603_robomaster_sdkports bash
+source /opt/ros/humble/setup.bash
+cd /home/ubuntu/ros2_ws
+colcon build --packages-select cs603_voice_intent
+source install/setup.bash
+```
+
+Full robot-day checklist (topics, dry-run, motion enable):
+[`docs/VOICE_INTENT_RUNBOOK.md`](docs/VOICE_INTENT_RUNBOOK.md).
+
+### What is verified vs not verified
+
+Verified:
+
+- Local pytest: 68 passed.
+- ROS Humble Docker build: `colcon build` clean.
+- ROS Humble Docker test: `colcon test` clean.
+- `ros2 launch ... --show-args` for the integration launch file.
+- `/voice_intent` smoke: stdin phrase -> correct `CMD_*` published.
+- `/cmd_vel` gate smoke: raw Twist gated by FSM, `CMD_STOP` zeros instantly.
+- Web bridge smoke: `/api/transcribe` round-trip with `tiny.en`.
+
+Not yet verified (needs robot day):
+
+- Live human voice reliability over a real microphone in the demo room.
+- Real robot floor motion through the gate.
+- Camera-follow integration end-to-end (depends on the
+  `feature/camera_detection` branch being merged).
+
 ## Why ROS 2 Humble
 
 ROS 2 Humble is used because it is the ROS 2 distribution built for Ubuntu 22.04. Foxy was built around Ubuntu 20.04 and is now end-of-life, so Humble is a better choice for a current Ubuntu 22.04 development machine.

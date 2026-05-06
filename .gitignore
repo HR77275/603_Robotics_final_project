@@ -59,3 +59,15 @@ NOTES_*.md
 TODO_*.md
 private/
 scratch/
+
+# Local agent / tool state (never commit)
+.swarm/
+.codex/
+.agent_*/
+
+# Local/private face database material (camera_detection lane)
+face_db/images/*
+face_db/embeddings/*
+!face_db/images/.gitkeep
+!face_db/embeddings/.gitkeep
+!face_db/README.md

@@ -41,9 +41,7 @@ _COMMAND_PATTERNS = (
             r"\bcome along\b",
             r"\bstart following\b",
             r"\btrack me\b",
-            r"\bresume\b",
             r"\bgreen light\b",
-            r"\bgo\b",
         ),
     ),
 )
