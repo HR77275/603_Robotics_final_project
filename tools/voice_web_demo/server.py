@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 import secrets
+import shlex
 import shutil
 import subprocess
 import sys
@@ -21,8 +22,29 @@ from typing import Any
 from urllib.parse import urlparse
 
 
-WHISPER_BIN = os.environ.get("CS603_WHISPER_BIN", "/opt/homebrew/bin/whisper")
+WHISPER_BIN_DEFAULT = "/opt/homebrew/bin/whisper"
+ROS_SETUP_DEFAULT = "/home/ubuntu/ros2_ws/install/setup.bash"
+
+
+def resolve_whisper_bin() -> str:
+    """Resolve the whisper binary path.
+
+    Order: explicit CS603_WHISPER_BIN env var > PATH lookup via shutil.which >
+    macOS Homebrew default. The Homebrew default is kept as a final fallback so
+    the missing-binary error message at runtime is consistent and self-explanatory.
+    """
+    explicit = os.environ.get("CS603_WHISPER_BIN")
+    if explicit:
+        return explicit
+    found = shutil.which("whisper")
+    if found:
+        return found
+    return WHISPER_BIN_DEFAULT
+
+
+WHISPER_BIN = resolve_whisper_bin()
 WHISPER_MODEL = os.environ.get("CS603_WHISPER_MODEL", "base.en")
+ROS_SETUP_PATH = os.environ.get("CS603_ROS_SETUP", ROS_SETUP_DEFAULT)
 MAX_AUDIO_UPLOAD_BYTES = int(os.environ.get("CS603_MAX_AUDIO_UPLOAD_BYTES", str(12 * 1024 * 1024)))
 MAX_JSON_UPLOAD_BYTES = int(os.environ.get("CS603_MAX_JSON_UPLOAD_BYTES", "4096"))
 
@@ -213,7 +235,7 @@ def publish_intent(container: str, intent: str) -> subprocess.CompletedProcess[s
 
     ros_command = (
         "source /opt/ros/humble/setup.bash && "
-        "source /home/ubuntu/ros2_ws/install/setup.bash && "
+        f"source {shlex.quote(ROS_SETUP_PATH)} && "
         f"ros2 topic pub --once /voice_intent std_msgs/msg/String '{{data: {intent}}}'"
     )
     result = subprocess.run(

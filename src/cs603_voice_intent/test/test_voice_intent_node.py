@@ -148,6 +148,17 @@ class VoiceIntentNodeTest(unittest.TestCase):
         self.assertEqual(exc.exception.code, 0)
         self.assertEqual(node.publisher.messages[-1].data, "CMD_STOP")
 
+    def test_unsupported_input_mode_marks_fatal_and_exits(self):
+        node = self.make_node(input_mode="bogus")
+
+        self.assertTrue(node._fatal_error)
+
+        with self.assertRaises(SystemExit) as exc:
+            node._on_timer()
+
+        self.assertEqual(exc.exception.code, 1)
+        self.assertEqual(node.publisher.messages, [])
+
 
 if __name__ == "__main__":
     unittest.main()

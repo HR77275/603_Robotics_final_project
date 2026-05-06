@@ -52,6 +52,7 @@ class VoiceIntentNode(Node):
             self.get_logger().info("mic_once mode: recording one microphone clip for Whisper transcription.")
         else:
             self.get_logger().error(f"Unsupported input_mode={self.input_mode!r}; use stdin, param, or mic_once.")
+            self._fatal_error = True
 
     def _read_stdin(self) -> None:
         while rclpy.ok():
@@ -116,7 +117,7 @@ class VoiceIntentNode(Node):
         if self.exit_after_first_publish and self._published_once:
             raise SystemExit(0)
 
-        if self.input_mode == "mic_once" and self._fatal_error:
+        if self._fatal_error:
             raise SystemExit(1)
 
     def _publish_transcript(self, transcript: str) -> None:

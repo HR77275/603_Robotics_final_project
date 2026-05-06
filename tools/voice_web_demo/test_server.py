@@ -1,3 +1,4 @@
+import os
 import subprocess
 import unittest
 from unittest import mock
@@ -183,6 +184,39 @@ class TranscribePublishResponseTest(unittest.TestCase):
         self.assertEqual(response["intent"], "CMD_FOLLOW")
         self.assertEqual(response["speech"], "Following.")
         self.assertEqual(response["publish_error"], "docker failed")
+
+
+class RosSetupPathTest(unittest.TestCase):
+    @mock.patch("server.subprocess.run")
+    def test_publish_intent_uses_configured_ros_setup_path(self, run_mock):
+        run_mock.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+        with mock.patch.object(server, "ROS_SETUP_PATH", "/custom/ros/setup.bash"):
+            server.publish_intent("container", "CMD_STOP")
+
+        bash_command = run_mock.call_args.args[0][-1]
+        self.assertIn("source /custom/ros/setup.bash", bash_command)
+        self.assertNotIn("/home/ubuntu/ros2_ws/install/setup.bash", bash_command)
+
+    def test_resolve_whisper_bin_prefers_explicit_env_var(self):
+        with mock.patch.dict(os.environ, {"CS603_WHISPER_BIN": "/explicit/whisper"}):
+            self.assertEqual(server.resolve_whisper_bin(), "/explicit/whisper")
+
+    def test_resolve_whisper_bin_falls_back_to_path_lookup(self):
+        env = {k: v for k, v in os.environ.items() if k != "CS603_WHISPER_BIN"}
+        with mock.patch.dict(os.environ, env, clear=True), \
+             mock.patch("server.shutil.which", return_value="/usr/local/bin/whisper"):
+            self.assertEqual(server.resolve_whisper_bin(), "/usr/local/bin/whisper")
+
+    def test_resolve_whisper_bin_falls_back_to_homebrew_default(self):
+        env = {k: v for k, v in os.environ.items() if k != "CS603_WHISPER_BIN"}
+        with mock.patch.dict(os.environ, env, clear=True), \
+             mock.patch("server.shutil.which", return_value=None):
+            self.assertEqual(server.resolve_whisper_bin(), server.WHISPER_BIN_DEFAULT)
 
 
 if __name__ == "__main__":
