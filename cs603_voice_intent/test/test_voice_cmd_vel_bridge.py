@@ -22,6 +22,11 @@ class _String:
         self.data = data
 
 
+class _Bool:
+    def __init__(self, data=False):
+        self.data = data
+
+
 class _Parameter:
     def __init__(self, value):
         self.value = value
@@ -95,6 +100,7 @@ def _install_ros_fakes():
 
     fake_std_msgs = types.ModuleType("std_msgs")
     fake_std_msgs_msg = types.ModuleType("std_msgs.msg")
+    fake_std_msgs_msg.Bool = _Bool
     fake_std_msgs_msg.String = _String
     fake_std_msgs.msg = fake_std_msgs_msg
 

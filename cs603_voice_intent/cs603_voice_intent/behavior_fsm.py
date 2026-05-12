@@ -2,8 +2,8 @@
 
 States: IDLE, FOLLOWING, STOPPED, APPROACHING.
 Default is safe: no /cmd_vel published. PID follow controller (separate node)
-subscribes to /follow_target which this FSM publishes only when FOLLOWING or
-APPROACHING. Optional speaker ACK via /sound/play_sound_id service.
+subscribes to /follow_target_active and moves only when this FSM is FOLLOWING
+or APPROACHING. Optional speaker ACK via /sound/play_sound_id service.
 """
 
 from __future__ import annotations

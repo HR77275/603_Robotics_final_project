@@ -148,8 +148,35 @@ CS603_ROS_SETUP="$ROBOMASTER_WS/install/setup.bash" python3 tools/voice_web_demo
 Only enable motion after the RoboMaster driver is connected, the robot has room
 to move, and the emergency stop command is ready.
 
+Bench-test the full voice/FSM/follow-controller path with fake perception and
+motion disabled:
+
 ```bash
-ros2 launch cs603_voice_intent voice_demo.launch.py input_mode:=param enable_motion:=true stub_text:="follow me"
+ros2 launch cs603_voice_intent integration_demo.launch.py \
+  start_perception:=false \
+  use_fake_perception:=true \
+  enable_motion:=false \
+  input_mode:=param \
+  stub_text:="follow me"
+```
+
+Run the real perception/FSM/follow stack with motion disabled:
+
+```bash
+ros2 launch cs603_voice_intent integration_demo.launch.py \
+  start_perception:=true \
+  use_depth:=true \
+  enable_motion:=false
+```
+
+Enable physical follow motion only after `/behavior_state`,
+`/follow_target_active`, and perception topics look correct:
+
+```bash
+ros2 launch cs603_voice_intent integration_demo.launch.py \
+  start_perception:=true \
+  use_depth:=true \
+  enable_motion:=true
 ```
 
 Emergency stop:

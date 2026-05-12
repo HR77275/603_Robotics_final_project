@@ -52,5 +52,11 @@ def generate_launch_description():
                     }
                 ],
             ),
+            Node(
+                package="cs603_voice_intent",
+                executable="behavior_fsm",
+                name="behavior_fsm",
+                output="screen",
+            ),
         ]
     )

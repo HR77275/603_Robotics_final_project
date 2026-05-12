@@ -89,6 +89,60 @@ Emergency stop:
 ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{}" --once
 ```
 
+## Voice + Camera Integration Demo
+
+The integration launch wires voice intent to the behavior FSM, then lets the FSM
+gate the PID follow controller:
+
+```text
+/voice_intent -> /behavior_state + /follow_target_active -> follow_node -> /cmd_vel
+```
+
+Bench test with fake perception and no physical motion:
+
+```bash
+ros2 launch cs603_voice_intent integration_demo.launch.py \
+  start_perception:=false \
+  use_fake_perception:=true \
+  enable_motion:=false \
+  input_mode:=param \
+  stub_text:="follow me"
+```
+
+Watch the FSM and command topics:
+
+```bash
+ros2 topic echo /behavior_state
+ros2 topic echo /follow_target_active
+ros2 topic echo /cmd_vel
+```
+
+Send more voice intents while launch is running:
+
+```bash
+ros2 param set /voice_intent_node stub_text "come here"
+ros2 param set /voice_intent_node stub_text "stop"
+```
+
+Real camera/perception path, still motion-disabled:
+
+```bash
+ros2 launch cs603_voice_intent integration_demo.launch.py \
+  start_perception:=true \
+  use_depth:=true \
+  enable_motion:=false
+```
+
+Only after verifying perception, FSM state, and emergency stop, enable physical
+motion:
+
+```bash
+ros2 launch cs603_voice_intent integration_demo.launch.py \
+  start_perception:=true \
+  use_depth:=true \
+  enable_motion:=true
+```
+
 ## Whisper Setup On WSL
 
 Install the system audio/build tools and the Python packages in Ubuntu 22.04:
