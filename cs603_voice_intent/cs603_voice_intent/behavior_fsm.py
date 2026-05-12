@@ -11,9 +11,17 @@ from __future__ import annotations
 import signal
 from dataclasses import dataclass
 
-import rclpy
-from rclpy.node import Node
-from std_msgs.msg import Bool, String
+try:
+    import rclpy
+    from rclpy.node import Node
+    from std_msgs.msg import Bool, String
+except ModuleNotFoundError:
+    rclpy = None
+
+    class Node:  # type: ignore[no-redef]
+        pass
+
+    Bool = String = None  # type: ignore[assignment]
 
 from cs603_voice_intent.intent_classifier import (
     CMD_APPROACH,
@@ -48,6 +56,8 @@ class BehaviorFsm(Node):
     """Plain rclpy FSM. No /cmd_vel published; emits /behavior_state and /follow_target_active."""
 
     def __init__(self) -> None:
+        if rclpy is None:
+            raise RuntimeError("behavior_fsm requires ROS 2 Python packages; source ROS Humble first.")
         super().__init__("behavior_fsm")
         self.declare_parameter("intent_topic", "/voice_intent")
         self.declare_parameter("state_topic", "/behavior_state")
@@ -106,6 +116,9 @@ class BehaviorFsm(Node):
 
 
 def main(args=None) -> None:
+    if rclpy is None:
+        raise RuntimeError("behavior_fsm requires ROS 2 Python packages; source ROS Humble first.")
+
     rclpy.init(args=args)
     node = BehaviorFsm()
 
