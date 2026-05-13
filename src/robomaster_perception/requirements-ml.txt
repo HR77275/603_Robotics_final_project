@@ -1,0 +1,13 @@
+# Python dependencies for the RoboMaster perception ML pipeline.
+# Install after ROS 2 Humble dependencies are installed and sourced.
+#
+# PyTorch CUDA wheels are intentionally not pinned here because the correct
+# index URL depends on the machine CUDA/driver setup. See src/README.md.
+
+deep-sort-realtime
+transformers
+safetensors
+huggingface_hub
+Pillow>=10,<11
+insightface
+onnxruntime

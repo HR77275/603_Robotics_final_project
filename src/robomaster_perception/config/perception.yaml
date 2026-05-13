@@ -1,0 +1,40 @@
+deepsort_tracker_node:
+  ros__parameters:
+    image_topic: /camera/image_color
+    vision_topic: /vision
+    output_topic: /people/tracks
+    embedder: torchreid
+    embedder_gpu: true
+    max_age: 45
+    n_init: 3
+    max_iou_distance: 0.9
+    max_cosine_distance: 0.5
+
+depth_estimator_node:
+  ros__parameters:
+    image_topic: /camera/image_color
+    tracks_topic: /people/tracks
+    depth_topic: /depth/image
+    depth_viz_topic: /depth/image_viz
+    people_depth_topic: /people/depth
+    tof_topic: /range_0
+    rate_hz: 2.0
+    device: cuda
+    model_name: depth-anything/Depth-Anything-V2-Metric-Indoor-Small-hf
+
+face_identity_node:
+  ros__parameters:
+    image_topic: /camera/image_color
+    tracks_topic: /people/tracks
+    output_topic: /people/identities
+    face_db_path: face_db/embeddings/face_db.npz
+    rate_hz: 1.0
+    threshold: 0.35
+    model_name: buffalo_l
+    det_size: 640
+    crop_padding: 0.15
+    identity_hold_sec: 10.0
+    use_gpu: false
+
+tracking_overlay_node:
+  ros__parameters: {}
