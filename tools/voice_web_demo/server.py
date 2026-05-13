@@ -8,6 +8,7 @@ It never publishes /cmd_vel or starts the motion bridge.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import secrets
@@ -19,12 +20,21 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 
 WHISPER_BIN = os.environ.get("CS603_WHISPER_BIN", "whisper")
 WHISPER_MODEL = os.environ.get("CS603_WHISPER_MODEL", "base.en")
 STT_BACKEND = os.environ.get("CS603_STT_BACKEND", "auto").strip().lower()
+VOICE_PROVIDER = os.environ.get("CS603_VOICE_PROVIDER", "browser-webspeech").strip().lower()
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_REALTIME_MODEL = os.environ.get("CS603_OPENAI_REALTIME_MODEL", "gpt-realtime-2").strip()
+OPENAI_REALTIME_VOICE = os.environ.get("CS603_OPENAI_REALTIME_VOICE", "marin").strip()
+OPENAI_REALTIME_CLIENT_SECRET_URL = "https://api.openai.com/v1/realtime/client_secrets"
+EXTERNAL_REALTIME_URL = os.environ.get("CS603_EXTERNAL_REALTIME_URL", "").strip()
+EXTERNAL_REALTIME_LABEL = os.environ.get("CS603_EXTERNAL_REALTIME_LABEL", "external-realtime").strip()
 DEFAULT_WORKSPACE = Path(os.environ.get("ROBOMASTER_WS", "~/robomaster_ws")).expanduser()
 DEFAULT_ROS_SETUP_FILES = (
     "/opt/ros/humble/setup.bash",
@@ -40,7 +50,29 @@ TOKEN_PLACEHOLDER = "__CS603_VOICE_DEMO_TOKEN__"
 
 sys.path.insert(0, str(VOICE_PACKAGE_PATH))
 
-from cs603_voice_intent.intent_classifier import classify_intent  # noqa: E402
+from cs603_voice_intent.intent_classifier import (  # noqa: E402
+    CMD_APPROACH,
+    CMD_FOLLOW,
+    CMD_STOP,
+    CMD_UNKNOWN,
+    classify_intent,
+)
+
+
+ALLOWED_INTENTS = {CMD_APPROACH, CMD_FOLLOW, CMD_STOP, CMD_UNKNOWN}
+VOICE_PROVIDER_IDS = {"browser-webspeech", "local-whisper", "openai-realtime", "external-realtime"}
+DEFAULT_OPENAI_REALTIME_INSTRUCTIONS = (
+    "You are Sam, the CS603 DJI RoboMaster robot voice. Keep replies short, natural, "
+    "and spoken. The robot only has four safe command intents: CMD_FOLLOW, CMD_STOP, "
+    "CMD_APPROACH, and CMD_UNKNOWN. When the user asks the robot to follow, stop, "
+    "or come closer, call publish_robot_intent with the matching intent. Do not invent "
+    "other robot actions. If the user says stop, wait, emergency, or anything unsafe, "
+    "prefer CMD_STOP."
+)
+OPENAI_REALTIME_INSTRUCTIONS = os.environ.get(
+    "CS603_OPENAI_REALTIME_INSTRUCTIONS",
+    DEFAULT_OPENAI_REALTIME_INSTRUCTIONS,
+)
 
 
 class VoiceIntentServer(ThreadingHTTPServer):
@@ -68,14 +100,23 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
         if self.path == "/api/health":
             self._send_json(self._health())
             return
+        if self.path == "/api/voice/providers":
+            self._send_json(voice_provider_config())
+            return
         self.send_error(404)
 
     def do_POST(self) -> None:  # noqa: N802
         if self.path == "/api/intent":
             self._handle_intent()
             return
+        if self.path == "/api/publish_intent":
+            self._handle_publish_intent()
+            return
         if self.path == "/api/transcribe":
             self._handle_transcribe()
+            return
+        if self.path == "/api/realtime/openai/client-secret":
+            self._handle_openai_realtime_client_secret()
             return
         self.send_error(404)
 
@@ -104,6 +145,31 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
                     "stderr": result.stderr[-2000:],
                 }
             )
+        except Exception as exc:  # noqa: BLE001 - expose demo-time failures.
+            self._send_json({"ok": False, "error": str(exc)}, status=500)
+
+    def _handle_publish_intent(self) -> None:
+        try:
+            if not request_is_authorized(self.headers, self.server.token):
+                raise PermissionError("unauthorized publish intent request")
+            if not publish_allowed(self.client_address[0], self.server.allow_lan_publish):
+                raise PermissionError("LAN publish disabled; restart with --allow-lan-publish for phone demos")
+
+            body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            payload = json.loads(body.decode("utf-8") or "{}")
+            intent = str(payload.get("intent", "")).strip()
+            transcript = str(payload.get("transcript", "")).strip()
+            provider = str(payload.get("provider", "unknown")).strip() or "unknown"
+            if not intent and transcript:
+                intent = classify_intent(transcript)
+            if not intent:
+                raise ValueError("empty intent")
+
+            response = publish_robot_intent_payload(self.server.ros_setup_files, intent, provider)
+            if transcript:
+                response["transcript"] = transcript
+                response["commandText"] = transcript
+            self._send_json(response)
         except Exception as exc:  # noqa: BLE001 - expose demo-time failures.
             self._send_json({"ok": False, "error": str(exc)}, status=500)
 
@@ -207,6 +273,19 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
         except Exception as exc:  # noqa: BLE001 - demo health endpoint.
             return {"ok": False, "ros_setup_files": self.server.ros_setup_files, "error": str(exc)}
 
+    def _handle_openai_realtime_client_secret(self) -> None:
+        try:
+            if not request_is_authorized(self.headers, self.server.token):
+                raise PermissionError("unauthorized realtime request")
+            _ = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            data = create_openai_realtime_client_secret(
+                OPENAI_API_KEY,
+                openai_safety_identifier(self.server.token),
+            )
+            self._send_json(data)
+        except Exception as exc:  # noqa: BLE001 - expose demo-time failures.
+            self._send_json({"ok": False, "error": str(exc)}, status=500)
+
     def _send_json(self, payload: dict[str, Any], status: int = 200) -> None:
         data = json.dumps(payload).encode("utf-8")
         self.send_response(status)
@@ -224,7 +303,7 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
 
 
 def publish_intent(ros_setup_files: list[str], intent: str) -> subprocess.CompletedProcess[str]:
-    if not intent.startswith("CMD_"):
+    if intent not in ALLOWED_INTENTS:
         raise ValueError(f"refusing unexpected intent {intent!r}")
 
     ros_command = build_ros_shell_command(
@@ -241,6 +320,19 @@ def publish_intent(ros_setup_files: list[str], intent: str) -> subprocess.Comple
     if result.returncode != 0:
         raise RuntimeError((result.stderr or result.stdout).strip())
     return result
+
+
+def publish_robot_intent_payload(ros_setup_files: list[str], intent: str, provider: str) -> dict[str, Any]:
+    started = time.perf_counter()
+    result = publish_intent(ros_setup_files, intent)
+    return {
+        "ok": True,
+        "intent": intent,
+        "provider": provider,
+        "publishMs": elapsed_ms(started),
+        "stdout": result.stdout[-2000:],
+        "stderr": result.stderr[-2000:],
+    }
 
 
 def build_ros_shell_command(ros_setup_files: list[str], command: str) -> str:
@@ -286,6 +378,138 @@ def resolve_stt_backend_quiet() -> str:
 
 def stt_model_label(backend: str) -> str:
     return WHISPER_MODEL
+
+
+def voice_provider_config() -> dict[str, Any]:
+    active_provider = VOICE_PROVIDER if VOICE_PROVIDER in VOICE_PROVIDER_IDS else "browser-webspeech"
+    return {
+        "ok": True,
+        "activeProvider": active_provider,
+        "intentEndpoint": "/api/intent",
+        "publishIntentEndpoint": "/api/publish_intent",
+        "providers": [
+            {
+                "id": "browser-webspeech",
+                "label": "Browser Web Speech",
+                "mode": "command",
+                "duplex": False,
+                "available": True,
+                "cost": "free",
+            },
+            {
+                "id": "local-whisper",
+                "label": "Local Whisper",
+                "mode": "command",
+                "duplex": False,
+                "available": resolve_stt_backend_quiet() != "unavailable",
+                "backend": resolve_stt_backend_quiet(),
+                "model": WHISPER_MODEL,
+                "cost": "free",
+            },
+            {
+                "id": "openai-realtime",
+                "label": "OpenAI Realtime",
+                "mode": "duplex",
+                "duplex": True,
+                "available": bool(OPENAI_API_KEY),
+                "model": OPENAI_REALTIME_MODEL,
+                "voice": OPENAI_REALTIME_VOICE,
+                "clientSecretEndpoint": "/api/realtime/openai/client-secret",
+                "cost": "paid",
+            },
+            {
+                "id": "external-realtime",
+                "label": EXTERNAL_REALTIME_LABEL,
+                "mode": "duplex",
+                "duplex": True,
+                "available": bool(EXTERNAL_REALTIME_URL),
+                "url": EXTERNAL_REALTIME_URL,
+                "cost": "provider-dependent",
+            },
+        ],
+    }
+
+
+def build_openai_realtime_session_config() -> dict[str, Any]:
+    return {
+        "session": {
+            "type": "realtime",
+            "model": OPENAI_REALTIME_MODEL,
+            "instructions": OPENAI_REALTIME_INSTRUCTIONS,
+            "audio": {
+                "output": {
+                    "voice": OPENAI_REALTIME_VOICE,
+                },
+            },
+            "tool_choice": "auto",
+            "tools": [
+                {
+                    "type": "function",
+                    "name": "publish_robot_intent",
+                    "description": (
+                        "Publish one safe command intent to the CS603 DJI RoboMaster ROS bridge. "
+                        "Use this only for robot movement or stop commands."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "intent": {
+                                "type": "string",
+                                "enum": sorted(ALLOWED_INTENTS),
+                                "description": "The robot command intent to publish.",
+                            },
+                            "transcript": {
+                                "type": "string",
+                                "description": "Optional short phrase that caused the command.",
+                            },
+                        },
+                        "required": ["intent"],
+                    },
+                }
+            ],
+        }
+    }
+
+
+def openai_safety_identifier(token: str) -> str:
+    if os.environ.get("CS603_OPENAI_SAFETY_IDENTIFIER"):
+        return os.environ["CS603_OPENAI_SAFETY_IDENTIFIER"]
+    digest = hashlib.sha256(f"cs603:{token}".encode("utf-8")).hexdigest()[:32]
+    return f"cs603-demo-{digest}"
+
+
+def create_openai_realtime_client_secret(api_key: str, safety_identifier: str) -> dict[str, Any]:
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is required for CS603_VOICE_PROVIDER=openai-realtime")
+
+    body = json.dumps(build_openai_realtime_session_config()).encode("utf-8")
+    request = Request(
+        OPENAI_REALTIME_CLIENT_SECRET_URL,
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "OpenAI-Safety-Identifier": safety_identifier,
+        },
+    )
+    try:
+        with urlopen(request, timeout=15) as response:
+            raw = response.read().decode("utf-8")
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"OpenAI Realtime client secret failed ({exc.code}): {detail[-800:]}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"OpenAI Realtime client secret failed: {exc.reason}") from exc
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("OpenAI Realtime client secret returned non-JSON response") from exc
+    if not isinstance(data, dict) or "value" not in data:
+        raise RuntimeError("OpenAI Realtime client secret response did not include value")
+    return data
 
 
 def resolve_stt_backend() -> str:

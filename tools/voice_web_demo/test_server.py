@@ -59,6 +59,10 @@ class PublishIntentTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             server.publish_intent(["/tmp/setup.bash"], "follow me")
 
+    def test_rejects_unknown_cmd_prefixed_payload(self):
+        with self.assertRaises(ValueError):
+            server.publish_intent(["/tmp/setup.bash"], "CMD_SPIN")
+
     @mock.patch("server.subprocess.run")
     def test_publishes_intent_through_local_ros2_cli(self, run_mock):
         run_mock.return_value = subprocess.CompletedProcess(
@@ -125,6 +129,89 @@ class WhisperBackendTest(unittest.TestCase):
         with mock.patch.object(server, "STT_BACKEND", "unsupported-backend"):
             with self.assertRaisesRegex(RuntimeError, "CS603_STT_BACKEND"):
                 server.run_whisper("/tmp/audio.webm")
+
+
+class VoiceProviderConfigTest(unittest.TestCase):
+    def test_default_provider_is_free_browser_command_mode(self):
+        with (
+            mock.patch.object(server, "VOICE_PROVIDER", "browser-webspeech"),
+            mock.patch.object(server, "OPENAI_API_KEY", ""),
+            mock.patch.object(server, "EXTERNAL_REALTIME_URL", ""),
+        ):
+            config = server.voice_provider_config()
+
+        self.assertEqual(config["activeProvider"], "browser-webspeech")
+        self.assertEqual(config["intentEndpoint"], "/api/intent")
+        self.assertEqual(config["publishIntentEndpoint"], "/api/publish_intent")
+        providers = {provider["id"]: provider for provider in config["providers"]}
+        self.assertTrue(providers["browser-webspeech"]["available"])
+        self.assertEqual(providers["browser-webspeech"]["cost"], "free")
+        self.assertFalse(providers["openai-realtime"]["available"])
+
+    def test_openai_provider_reports_model_and_key_availability(self):
+        with (
+            mock.patch.object(server, "VOICE_PROVIDER", "openai-realtime"),
+            mock.patch.object(server, "OPENAI_API_KEY", "sk-test"),
+            mock.patch.object(server, "OPENAI_REALTIME_MODEL", "gpt-realtime-2"),
+            mock.patch.object(server, "OPENAI_REALTIME_VOICE", "marin"),
+        ):
+            config = server.voice_provider_config()
+
+        providers = {provider["id"]: provider for provider in config["providers"]}
+        self.assertEqual(config["activeProvider"], "openai-realtime")
+        self.assertTrue(providers["openai-realtime"]["available"])
+        self.assertEqual(providers["openai-realtime"]["model"], "gpt-realtime-2")
+        self.assertEqual(providers["openai-realtime"]["voice"], "marin")
+
+
+class OpenAIRealtimeConfigTest(unittest.TestCase):
+    def test_openai_session_config_has_duplex_audio_and_robot_tool(self):
+        with (
+            mock.patch.object(server, "OPENAI_REALTIME_MODEL", "gpt-realtime-2"),
+            mock.patch.object(server, "OPENAI_REALTIME_VOICE", "marin"),
+        ):
+            config = server.build_openai_realtime_session_config()
+
+        session = config["session"]
+        self.assertEqual(session["type"], "realtime")
+        self.assertEqual(session["model"], "gpt-realtime-2")
+        self.assertEqual(session["audio"]["output"]["voice"], "marin")
+        self.assertEqual(session["tool_choice"], "auto")
+        tool = session["tools"][0]
+        self.assertEqual(tool["name"], "publish_robot_intent")
+        self.assertEqual(tool["parameters"]["properties"]["intent"]["enum"], sorted(server.ALLOWED_INTENTS))
+
+    @mock.patch("server.urlopen")
+    def test_client_secret_request_uses_server_side_key_only(self, urlopen_mock):
+        response = mock.Mock()
+        response.status = 200
+        response.read.return_value = b'{"value":"ephemeral-test"}'
+        urlopen_mock.return_value.__enter__.return_value = response
+
+        data = server.create_openai_realtime_client_secret("sk-test", "safety-id")
+
+        self.assertEqual(data["value"], "ephemeral-test")
+        request = urlopen_mock.call_args.args[0]
+        self.assertEqual(request.full_url, "https://api.openai.com/v1/realtime/client_secrets")
+        self.assertNotIn("sk-test", str(data))
+
+
+class PublishIntentPayloadTest(unittest.TestCase):
+    @mock.patch("server.publish_intent")
+    def test_publishes_direct_robot_intent_payload(self, publish_mock):
+        publish_mock.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="published",
+            stderr="",
+        )
+
+        result = server.publish_robot_intent_payload(["/tmp/setup.bash"], "CMD_STOP", "openai-realtime")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["intent"], "CMD_STOP")
+        self.assertEqual(result["provider"], "openai-realtime")
+        publish_mock.assert_called_once_with(["/tmp/setup.bash"], "CMD_STOP")
 
 
 if __name__ == "__main__":

@@ -115,7 +115,7 @@ ros2 launch cs603_voice_intent voice_demo.launch.py input_mode:=param stub_text:
 ros2 param set /voice_intent_node stub_text "stop"
 ```
 
-### Run Whisper/Web Voice Demo
+### Run Provider-Agnostic Web Voice Demo
 
 Start the local WSL/Ubuntu web bridge:
 
@@ -123,6 +123,7 @@ Start the local WSL/Ubuntu web bridge:
 cd "$CS603_PROJECT"
 source /opt/ros/humble/setup.bash
 source "$ROBOMASTER_WS/install/setup.bash"
+CS603_VOICE_PROVIDER=browser-webspeech \
 CS603_STT_BACKEND=auto \
 python3 tools/voice_web_demo/server.py --host 0.0.0.0 --port 8765 --allow-lan-publish --token cs603-demo-local
 ```
@@ -133,17 +134,39 @@ Open this in the Windows or Ubuntu browser:
 http://127.0.0.1:8765
 ```
 
-The browser records audio, the WSL server runs local STT, publishes classified
-intents on `/voice_intent`, logs STT/ROS latency, and the browser speaks a short
-acknowledgement for the command.
+The web panel has one voice contract and multiple providers. The default
+`browser-webspeech` mode is the fastest free command path: the browser listens,
+the server classifies text into `CMD_*`, ROS publishes `/voice_intent`, and the
+browser speaks the acknowledgement. Switch the settings provider to
+`local-whisper` if browser speech recognition is unavailable.
 
 Useful knobs:
 
 ```bash
+CS603_VOICE_PROVIDER=local-whisper CS603_STT_BACKEND=auto python3 tools/voice_web_demo/server.py
 CS603_WHISPER_MODEL=tiny.en python3 tools/voice_web_demo/server.py
 CS603_WHISPER_MODEL=base.en python3 tools/voice_web_demo/server.py
 CS603_ROS_SETUP="$ROBOMASTER_WS/install/setup.bash" python3 tools/voice_web_demo/server.py
 ```
+
+OpenAI Realtime duplex mode is optional and keeps the API key server-side:
+
+```bash
+OPENAI_API_KEY="sk-..." \
+CS603_VOICE_PROVIDER=openai-realtime \
+CS603_OPENAI_REALTIME_MODEL=gpt-realtime-2 \
+CS603_OPENAI_REALTIME_VOICE=marin \
+python3 tools/voice_web_demo/server.py --host 0.0.0.0 --port 8765 --allow-lan-publish --token cs603-demo-local
+```
+
+In OpenAI Realtime mode, the browser gets only an ephemeral client secret from
+the local server. The model can talk naturally, and robot motion still goes
+through the same safe `CMD_FOLLOW`, `CMD_STOP`, `CMD_APPROACH`, `CMD_UNKNOWN`
+intent contract.
+
+Any future local duplex provider can skip ROS details and call the same bridge:
+`POST /api/publish_intent` with `X-CS603-Voice-Token` and a JSON body like
+`{"intent":"CMD_STOP","provider":"personaplex-local"}`.
 
 ### Run Physical Robot Demo
 

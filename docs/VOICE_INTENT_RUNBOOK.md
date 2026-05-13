@@ -197,19 +197,25 @@ This records one short clip from the WSL-visible microphone, transcribes it,
 classifies it, and publishes one `/voice_intent` message. If WSL cannot access
 the microphone, use `stdin` mode for text tests or the browser web bridge below.
 
-### B. WSL Web Bridge (recommended for live demo)
+### B. Provider-Agnostic Web Bridge (recommended for live demo)
 
-`tools/voice_web_demo/server.py` exposes `/api/transcribe`. A browser records
-audio with MediaRecorder, posts the blob to the WSL server, WSL runs local STT
-with no API key, classifies the intent, and publishes directly to local ROS 2
-with `ros2 topic pub`. The UI logs STT/ROS latency and speaks a short command
-acknowledgement through browser speech synthesis.
+`tools/voice_web_demo/server.py` exposes one voice contract with multiple
+providers:
+
+- `browser-webspeech`: fastest free command path. Browser speech recognition in,
+  server intent classification, browser speech synthesis out.
+- `local-whisper`: current local STT fallback. Browser records audio, WSL runs
+  the existing `openai-whisper` CLI, then publishes the classified intent.
+- `openai-realtime`: paid true-duplex path. Browser talks to OpenAI Realtime over
+  WebRTC with an ephemeral client secret; model tool calls publish the same safe
+  robot intents.
 
 ```bash
 export ROBOMASTER_WS="${ROBOMASTER_WS:-$HOME/robomaster_ws}"
 cd "$ROBOMASTER_WS/src/603_Robotics_final_project"
 source /opt/ros/humble/setup.bash
 source "$ROBOMASTER_WS/install/setup.bash"
+CS603_VOICE_PROVIDER=browser-webspeech \
 CS603_STT_BACKEND=auto \
 python3 tools/voice_web_demo/server.py --host 0.0.0.0 --port 8765 --allow-lan-publish --token cs603-demo-local
 ```
@@ -226,6 +232,7 @@ the intent publishes automatically.
 Configure model, binary, or workspace setup via env vars if needed:
 
 ```bash
+CS603_VOICE_PROVIDER=local-whisper \
 CS603_STT_BACKEND=auto \
 CS603_WHISPER_MODEL=base.en \
 CS603_WHISPER_BIN=whisper \
@@ -233,11 +240,37 @@ CS603_ROS_SETUP="$ROBOMASTER_WS/install/setup.bash" \
 python3 tools/voice_web_demo/server.py --host 0.0.0.0 --port 8765
 ```
 
+OpenAI Realtime duplex mode:
+
+```bash
+OPENAI_API_KEY="sk-..." \
+CS603_VOICE_PROVIDER=openai-realtime \
+CS603_OPENAI_REALTIME_MODEL=gpt-realtime-2 \
+CS603_OPENAI_REALTIME_VOICE=marin \
+python3 tools/voice_web_demo/server.py --host 0.0.0.0 --port 8765 --allow-lan-publish --token cs603-demo-local
+```
+
+The OpenAI key never goes to the browser. The browser calls
+`/api/realtime/openai/client-secret`, the local server mints an ephemeral client
+secret, and the browser uses that secret for the WebRTC session.
+
+Provider endpoints:
+
+- `GET /api/voice/providers`: current provider list and availability.
+- `POST /api/intent`: transcript -> classifier -> `/voice_intent`.
+- `POST /api/publish_intent`: direct safe `CMD_*` publish for duplex tool calls.
+- `POST /api/transcribe`: local STT fallback.
+- `POST /api/realtime/openai/client-secret`: server-side OpenAI Realtime client
+  secret minting.
+
+External/local duplex models do not need to know ROS. They only need to call
+`POST /api/publish_intent` with the shared `X-CS603-Voice-Token` header and a
+JSON body such as `{"intent":"CMD_STOP","provider":"personaplex-local"}`.
+
 Latency: check the web UI log after each utterance. It prints backend, STT
 milliseconds, ROS publish milliseconds, and total request milliseconds. The
-current checked-in free/local path uses the existing `openai-whisper` CLI. If the
-team decides to pay for OpenAI Realtime for the final demo, keep that as a
-separate branch/PR instead of mixing it into this local bridge.
+command providers print STT/ROS timings where applicable. OpenAI Realtime mode
+is the duplex path for the final demo if the team decides to pay for API usage.
 
 ### Handoff status
 

@@ -456,7 +456,8 @@
       grid-template-columns: 1fr;
       gap: 6px;
     }
-    #micPicker {
+    #micPicker,
+    #voiceProviderPicker {
       height: 42px;
       border: 2px solid var(--line);
       background: #0b1114;
@@ -510,6 +511,7 @@
       <details class="advanced">
         <summary>⚙ settings</summary>
         <div class="mic-row">
+          <select id="voiceProviderPicker" aria-label="Select voice provider"></select>
           <select id="micPicker" aria-label="Select microphone"></select>
         </div>
       </details>
@@ -533,10 +535,54 @@
     const liveTextEl = document.getElementById("liveText");
     const whisperEl = document.getElementById("whisperBtn");
     const micPickerEl = document.getElementById("micPicker");
+    const voiceProviderPickerEl = document.getElementById("voiceProviderPicker");
     let mediaRecorder = null;
     let recordedChunks = [];
     let whisperBusy = false;
     let selectedMicId = "";
+    let activeVoiceProvider = "browser-webspeech";
+    let voiceProviderState = null;
+
+    function providerLabel(provider) {
+      const suffix = provider.available ? "" : " (not ready)";
+      const duplex = provider.duplex ? " duplex" : "";
+      return `${provider.label || provider.id}${duplex}${suffix}`;
+    }
+
+    async function loadVoiceProviders() {
+      try {
+        const res = await fetch("/api/voice/providers");
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || "provider config failed");
+        voiceProviderState = data;
+        activeVoiceProvider = data.activeProvider || "browser-webspeech";
+        voiceProviderPickerEl.innerHTML = "";
+        data.providers.forEach((provider) => {
+          const opt = document.createElement("option");
+          opt.value = provider.id;
+          opt.textContent = providerLabel(provider);
+          voiceProviderPickerEl.appendChild(opt);
+        });
+        voiceProviderPickerEl.value = activeVoiceProvider;
+        log(`voice provider: ${activeVoiceProvider}`);
+      } catch (error) {
+        log(`provider config error: ${error.message || error}`);
+      }
+    }
+
+    function selectedProviderConfig() {
+      if (!voiceProviderState) return null;
+      return voiceProviderState.providers.find((provider) => provider.id === activeVoiceProvider) || null;
+    }
+
+    if (voiceProviderPickerEl) {
+      voiceProviderPickerEl.addEventListener("change", () => {
+        if (voiceActive()) stopVoiceProvider();
+        activeVoiceProvider = voiceProviderPickerEl.value;
+        log(`voice provider selected: ${activeVoiceProvider}`);
+      });
+      loadVoiceProviders();
+    }
 
     async function populateMicPicker() {
       try {
@@ -834,6 +880,276 @@
     let liveSilenceMs = 0;
     let liveHadSpeech = false;
     let liveUtteranceStart = 0;
+    let webSpeechRecognition = null;
+    let webSpeechActive = false;
+    let realtimePc = null;
+    let realtimeDc = null;
+    let realtimeStream = null;
+    let realtimeAudioEl = null;
+    let realtimeActive = false;
+
+    function speechRecognitionCtor() {
+      return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+    }
+
+    function setLiveButton(active, label) {
+      liveEl.classList.toggle("on", active);
+      liveEl.textContent = label;
+    }
+
+    function voiceActive() {
+      return liveActive || webSpeechActive || realtimeActive;
+    }
+
+    function startVoiceProvider() {
+      if (activeVoiceProvider === "openai-realtime") {
+        openaiRealtimeStart();
+      } else if (activeVoiceProvider === "local-whisper") {
+        liveStart();
+      } else if (activeVoiceProvider === "external-realtime") {
+        externalRealtimeStart();
+      } else {
+        webSpeechStart();
+      }
+    }
+
+    function stopVoiceProvider() {
+      if (realtimeActive) openaiRealtimeStop();
+      if (webSpeechActive) webSpeechStop();
+      if (liveActive) liveStop();
+    }
+
+    async function webSpeechStart() {
+      const Recognition = speechRecognitionCtor();
+      if (!Recognition) {
+        log("browser speech recognition unavailable; switch to local-whisper");
+        setStatus("NO WEB SPEECH", "var(--red)", false);
+        setMode("warn");
+        return;
+      }
+      webSpeechRecognition = new Recognition();
+      webSpeechRecognition.continuous = true;
+      webSpeechRecognition.interimResults = true;
+      webSpeechRecognition.lang = "en-US";
+      webSpeechRecognition.onresult = (event) => {
+        let interim = "";
+        for (let i = event.resultIndex; i < event.results.length; i += 1) {
+          const text = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            publishTranscript(text);
+          } else {
+            interim += text;
+          }
+        }
+        if (interim) setLiveText(interim, false);
+      };
+      webSpeechRecognition.onerror = (event) => {
+        log(`webspeech error: ${event.error || "unknown"}`);
+        setStatus("SPEECH ERR", "var(--red)", false);
+        setMode("warn");
+      };
+      webSpeechRecognition.onend = () => {
+        if (webSpeechActive) {
+          try {
+            webSpeechRecognition.start();
+          } catch (_err) {
+            webSpeechStop();
+          }
+        }
+      };
+      webSpeechActive = true;
+      setLiveButton(true, "WebSpeech: listening - tap to stop");
+      setStatus("LIVE", "var(--yellow)", true);
+      setMode("active");
+      setLiveText("", false);
+      webSpeechRecognition.start();
+      log("webspeech started");
+    }
+
+    function webSpeechStop() {
+      webSpeechActive = false;
+      if (webSpeechRecognition) {
+        try { webSpeechRecognition.stop(); } catch (_err) { /* ignore */ }
+        webSpeechRecognition = null;
+      }
+      setLiveButton(false, "Live: tap to start");
+      setStatus("READY", "var(--green)", false);
+      setMode("idle");
+      setLiveText("", false);
+      log("webspeech stopped");
+    }
+
+    async function openaiRealtimeStart() {
+      const provider = selectedProviderConfig();
+      if (provider && !provider.available) {
+        log("openai realtime unavailable: set OPENAI_API_KEY on the server");
+        setStatus("NO API KEY", "var(--red)", false);
+        setMode("warn");
+        return;
+      }
+      try {
+        setStatus("CONNECTING", "var(--cyan)", true);
+        setMode("thinking");
+        const tokenResponse = await fetch("/api/realtime/openai/client-secret", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-CS603-Voice-Token": demoToken
+          },
+          body: "{}"
+        });
+        const tokenData = await tokenResponse.json();
+        if (!tokenResponse.ok || !tokenData.value) {
+          throw new Error(tokenData.error || "realtime token failed");
+        }
+
+        realtimePc = new RTCPeerConnection();
+        realtimeAudioEl = document.createElement("audio");
+        realtimeAudioEl.autoplay = true;
+        realtimePc.ontrack = (event) => {
+          realtimeAudioEl.srcObject = event.streams[0];
+        };
+
+        const audioConstraint = selectedMicId ? {deviceId: {exact: selectedMicId}} : true;
+        realtimeStream = await navigator.mediaDevices.getUserMedia({audio: audioConstraint});
+        realtimeStream.getTracks().forEach((track) => realtimePc.addTrack(track, realtimeStream));
+
+        realtimeDc = realtimePc.createDataChannel("oai-events");
+        realtimeDc.addEventListener("open", () => {
+          realtimeActive = true;
+          setLiveButton(true, "Realtime: duplex - tap to stop");
+          setStatus("DUPLEX LIVE", "var(--green)", true);
+          setMode("active");
+          log(`openai realtime connected (${provider ? provider.model : "model"})`);
+        });
+        realtimeDc.addEventListener("message", handleOpenAIRealtimeEvent);
+
+        const offer = await realtimePc.createOffer();
+        await realtimePc.setLocalDescription(offer);
+        const sdpResponse = await fetch("https://api.openai.com/v1/realtime/calls", {
+          method: "POST",
+          body: offer.sdp,
+          headers: {
+            "Authorization": `Bearer ${tokenData.value}`,
+            "Content-Type": "application/sdp"
+          }
+        });
+        if (!sdpResponse.ok) throw new Error(await sdpResponse.text());
+        await realtimePc.setRemoteDescription({
+          type: "answer",
+          sdp: await sdpResponse.text()
+        });
+      } catch (error) {
+        log(`openai realtime error: ${error.message || error}`);
+        setStatus("REALTIME ERR", "var(--red)", false);
+        setMode("warn");
+        openaiRealtimeStop(false);
+      }
+    }
+
+    function handleOpenAIRealtimeEvent(messageEvent) {
+      let event;
+      try {
+        event = JSON.parse(messageEvent.data);
+      } catch (_err) {
+        log("realtime event: non-json");
+        return;
+      }
+      if (event.type === "error") {
+        log(`realtime error: ${event.error && event.error.message ? event.error.message : "unknown"}`);
+        return;
+      }
+      if (event.type === "conversation.item.input_audio_transcription.completed" && event.transcript) {
+        setLiveText(event.transcript, true);
+        log(`realtime heard: ${JSON.stringify(event.transcript)}`);
+        return;
+      }
+      if (event.type === "response.function_call_arguments.done" &&
+          event.name === "publish_robot_intent") {
+        publishRealtimeRobotIntent(event);
+      }
+    }
+
+    async function publishRealtimeRobotIntent(event) {
+      let args = {};
+      try {
+        args = JSON.parse(event.arguments || "{}");
+      } catch (_err) {
+        args = {};
+      }
+      const payload = {
+        intent: args.intent || "",
+        transcript: args.transcript || "",
+        provider: "openai-realtime"
+      };
+      try {
+        const res = await fetch("/api/publish_intent", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-CS603-Voice-Token": demoToken
+          },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || "publish failed");
+        setStatus(data.intent, "var(--green)", false);
+        setMode("active");
+        log(`realtime tool -> ${data.intent}${latencyLabel(data)}`);
+        sendRealtimeToolOutput(event.call_id, {ok: true, intent: data.intent});
+      } catch (error) {
+        log(`realtime publish error: ${error.message || error}`);
+        setStatus("PUBLISH ERR", "var(--red)", false);
+        setMode("warn");
+        sendRealtimeToolOutput(event.call_id, {ok: false, error: error.message || String(error)});
+      }
+    }
+
+    function sendRealtimeToolOutput(callId, output) {
+      if (!callId || !realtimeDc || realtimeDc.readyState !== "open") return;
+      realtimeDc.send(JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          type: "function_call_output",
+          call_id: callId,
+          output: JSON.stringify(output)
+        }
+      }));
+      realtimeDc.send(JSON.stringify({type: "response.create"}));
+    }
+
+    function openaiRealtimeStop(resetUi = true) {
+      realtimeActive = false;
+      if (realtimeDc) {
+        try { realtimeDc.close(); } catch (_err) { /* ignore */ }
+        realtimeDc = null;
+      }
+      if (realtimePc) {
+        try { realtimePc.close(); } catch (_err) { /* ignore */ }
+        realtimePc = null;
+      }
+      if (realtimeStream) {
+        realtimeStream.getTracks().forEach((track) => track.stop());
+        realtimeStream = null;
+      }
+      if (realtimeAudioEl) {
+        realtimeAudioEl.srcObject = null;
+        realtimeAudioEl = null;
+      }
+      setLiveButton(false, "Live: tap to start");
+      if (resetUi) {
+        setStatus("READY", "var(--green)", false);
+        setMode("idle");
+        setLiveText("", false);
+      }
+      log("openai realtime stopped");
+    }
+
+    function externalRealtimeStart() {
+      log("external realtime provider configured server-side; browser adapter not active in this demo");
+      setStatus("EXT WAITING", "var(--yellow)", false);
+      setMode("warn");
+    }
 
     async function liveStart() {
       if (liveActive) return;
@@ -846,8 +1162,7 @@
         liveAnalyser.fftSize = 1024;
         source.connect(liveAnalyser);
         liveActive = true;
-        liveEl.classList.add("on");
-        liveEl.textContent = "Live: listening — tap to stop";
+        setLiveButton(true, "Local: listening - tap to stop");
         setStatus("LIVE", "var(--yellow)", true);
         setMode("active");
         setLiveText("", false);
@@ -971,8 +1286,7 @@
         liveAudioCtx = null;
       }
       liveAnalyser = null;
-      liveEl.classList.remove("on");
-      liveEl.textContent = "Live: tap to start";
+      setLiveButton(false, "Live: tap to start");
       setStatus("READY", "var(--green)", false);
       setMode("idle");
       setLiveText("", false);
@@ -981,7 +1295,7 @@
 
     if (liveEl) {
       liveEl.addEventListener("click", () => {
-        if (liveActive) liveStop(); else liveStart();
+        if (voiceActive()) stopVoiceProvider(); else startVoiceProvider();
       });
     }
 
