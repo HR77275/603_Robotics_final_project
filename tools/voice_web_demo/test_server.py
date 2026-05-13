@@ -1,4 +1,6 @@
 import subprocess
+import sys
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -106,12 +108,30 @@ class PublishIntentTest(unittest.TestCase):
 
 
 class WhisperEnvironmentTest(unittest.TestCase):
-    def test_whisper_env_prepends_python_shims(self):
-        env = server.whisper_subprocess_env()
-        first_pythonpath = env["PYTHONPATH"].split(":")[0]
+    def test_prepare_whisper_import_prepends_python_shims(self):
+        original_path = list(sys.path)
+        try:
+            sys.path = [path for path in sys.path if Path(path).name != "python_shims"]
+            server.prepare_whisper_import()
 
-        self.assertEqual(Path(first_pythonpath).name, "python_shims")
-        self.assertEqual(env["NUMBA_JIT_COVERAGE"], "0")
+            self.assertEqual(Path(sys.path[0]).name, "python_shims")
+            self.assertEqual(server.os.environ["NUMBA_JIT_COVERAGE"], "0")
+        finally:
+            sys.path = original_path
+
+    def test_transcriber_loads_model_once(self):
+        fake_whisper = types.ModuleType("whisper")
+        fake_model = mock.Mock()
+        fake_model.transcribe.return_value = {"text": " follow me "}
+        fake_whisper.load_model = mock.Mock(return_value=fake_model)
+
+        with mock.patch.dict(sys.modules, {"whisper": fake_whisper}):
+            transcriber = server.WhisperTranscriber("tiny.en")
+            self.assertEqual(transcriber.transcribe("/tmp/a.webm"), " follow me ")
+            self.assertEqual(transcriber.transcribe("/tmp/b.webm"), " follow me ")
+
+        fake_whisper.load_model.assert_called_once_with("tiny.en")
+        self.assertEqual(fake_model.transcribe.call_count, 2)
 
 
 if __name__ == "__main__":

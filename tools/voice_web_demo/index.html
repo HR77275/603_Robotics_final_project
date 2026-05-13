@@ -2,551 +2,309 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>CS603 Sam</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CS603 Voice Intent</title>
   <style>
     :root {
-      color-scheme: dark;
-      --bg: #0b1014;
-      --ink: #f8f1d8;
-      --muted: #9fb0a6;
-      --panel: #162126;
-      --line: #344b4f;
-      --green: #65d46e;
-      --yellow: #f1c852;
-      --red: #ff6767;
-      --cyan: #67d2ff;
-      --shadow: #050709;
+      color-scheme: light;
+      --bg: #f5f7f8;
+      --panel: #ffffff;
+      --ink: #142027;
+      --muted: #5d6b73;
+      --line: #cdd6dc;
+      --green: #1f8a4c;
+      --yellow: #a66b00;
+      --red: #b42318;
+      --blue: #1d5fd1;
     }
 
-    * {
-      box-sizing: border-box;
-      -webkit-tap-highlight-color: transparent;
-    }
+    * { box-sizing: border-box; }
 
-    html,
     body {
       margin: 0;
-      min-height: 100%;
-      background:
-        linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px) 0 0 / 16px 16px,
-        linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px) 0 0 / 16px 16px,
-        radial-gradient(circle at 20% 20%, #1b3d36, transparent 36%),
-        var(--bg);
-      color: var(--ink);
-      font-family: "Courier New", ui-monospace, SFMono-Regular, Menlo, monospace;
-      overflow: hidden;
-    }
-
-    body {
       min-height: 100dvh;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       display: grid;
       place-items: center;
-      padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right))
-        max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+      padding: 20px;
     }
 
-    .shell {
-      width: min(1120px, 100%);
-      height: min(620px, calc(100dvh - 24px));
-      min-height: 360px;
-      display: grid;
-      grid-template-columns: minmax(300px, 1fr) minmax(360px, 1.25fr);
-      gap: 14px;
-      border: 4px solid var(--line);
-      box-shadow: 0 0 0 4px var(--shadow), 0 20px 0 rgba(0,0,0,.28);
-      background: #0e1519;
-      padding: 14px;
-    }
-
-    .stage,
-    .console {
-      border: 3px solid var(--line);
+    main {
+      width: min(760px, 100%);
       background: var(--panel);
-      box-shadow: inset 0 0 0 3px #0f171b;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 24px;
+      box-shadow: 0 10px 30px rgba(20, 32, 39, 0.08);
     }
 
-    .stage {
-      position: relative;
-      display: grid;
-      place-items: center;
-      overflow: hidden;
-    }
-
-    .scanline {
-      position: absolute;
-      inset: 0;
-      background: repeating-linear-gradient(
-        to bottom,
-        rgba(255,255,255,.05) 0,
-        rgba(255,255,255,.05) 1px,
-        transparent 1px,
-        transparent 5px
-      );
-      pointer-events: none;
-      opacity: .45;
-    }
-
-    .bot {
-      width: min(250px, 64%);
-      aspect-ratio: 1;
-      display: grid;
-      grid-template-columns: repeat(9, 1fr);
-      grid-template-rows: repeat(9, 1fr);
-      gap: 4px;
-      image-rendering: pixelated;
-      animation: idle 1.6s steps(2) infinite;
-    }
-
-    .px {
-      background: transparent;
-    }
-
-    .body { background: var(--cyan); }
-    .edge { background: #102a35; }
-    .eye { background: var(--yellow); animation: blink 3s steps(1) infinite; }
-    .mouth { background: var(--green); }
-    .active .mouth { animation: talk .28s steps(2) infinite; }
-    .active .eye { background: var(--green); }
-    .warn .eye,
-    .warn .mouth { background: var(--red); }
-
-    .wave {
-      position: absolute;
-      bottom: 34px;
-      left: 28px;
-      right: 28px;
-      height: 54px;
-      display: grid;
-      grid-template-columns: repeat(18, 1fr);
-      gap: 6px;
-      align-items: end;
-    }
-
-    .bar {
-      background: var(--green);
-      min-height: 6px;
-      animation: bars 900ms steps(4) infinite;
-      opacity: .55;
-    }
-
-    .bar:nth-child(3n) { animation-delay: 120ms; height: 70%; }
-    .bar:nth-child(4n) { animation-delay: 240ms; height: 40%; }
-    .bar:nth-child(5n) { animation-delay: 360ms; height: 90%; }
-    .idle-bars .bar { animation-play-state: paused; height: 8px; background: var(--muted); }
-
-    .console {
-      padding: 16px;
-      display: grid;
-      grid-template-rows: auto auto auto auto 1fr auto;
-      gap: 12px;
-      min-width: 0;
-    }
-
-    .top {
+    header {
       display: flex;
+      align-items: center;
       justify-content: space-between;
-      gap: 12px;
-      align-items: start;
+      gap: 16px;
+      margin-bottom: 20px;
     }
 
     h1 {
       margin: 0;
-      font-size: clamp(22px, 4vw, 38px);
-      line-height: 1;
-      text-transform: uppercase;
+      font-size: 24px;
+      line-height: 1.2;
       letter-spacing: 0;
     }
 
     .status {
-      min-width: 180px;
-      border: 2px solid var(--line);
-      background: #0b1114;
-      color: var(--green);
-      padding: 8px;
+      min-width: 132px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 8px 12px;
+      color: var(--muted);
+      font-weight: 700;
       font-size: 13px;
-      text-align: right;
+      text-align: center;
     }
 
-    .input-row {
+    .status.ok { color: var(--green); border-color: rgba(31, 138, 76, 0.4); }
+    .status.busy { color: var(--yellow); border-color: rgba(166, 107, 0, 0.4); }
+    .status.err { color: var(--red); border-color: rgba(180, 35, 24, 0.4); }
+
+    .grid {
       display: grid;
-      grid-template-columns: 1fr auto auto;
+      gap: 16px;
+    }
+
+    .ptt {
+      height: 96px;
+      border: 0;
+      border-radius: 8px;
+      background: var(--blue);
+      color: #fff;
+      font-size: 24px;
+      font-weight: 800;
+      cursor: pointer;
+      user-select: none;
+      touch-action: none;
+    }
+
+    .ptt.recording { background: var(--red); }
+    .ptt:disabled { background: #9aa8b1; cursor: wait; }
+
+    .result {
+      display: grid;
+      grid-template-columns: 1fr 180px;
+      gap: 12px;
+    }
+
+    .field {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      min-height: 76px;
+    }
+
+    .label {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .value {
+      font-size: 18px;
+      overflow-wrap: anywhere;
+    }
+
+    .intent {
+      color: var(--green);
+      font-weight: 800;
+    }
+
+    .manual {
+      display: grid;
+      grid-template-columns: 1fr auto;
       gap: 8px;
     }
 
     input,
-    button {
-      height: 52px;
-      border: 3px solid var(--line);
-      border-radius: 0;
-      font-family: inherit;
-      font-size: 16px;
+    select,
+    button.secondary {
+      height: 44px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
       color: var(--ink);
-      background: #0b1114;
-      box-shadow: 0 4px 0 var(--shadow);
+      font: inherit;
     }
 
-    input {
+    input,
+    select {
       min-width: 0;
       padding: 0 12px;
     }
 
-    button {
+    button.secondary {
+      padding: 0 16px;
       cursor: pointer;
-      padding: 0 14px;
-      font-weight: 800;
-      text-transform: uppercase;
+      font-weight: 700;
     }
 
-    button:active {
-      transform: translateY(3px);
-      box-shadow: 0 1px 0 var(--shadow);
-    }
-
-    .primary {
-      background: var(--green);
-      color: #07100a;
-      border-color: #3f8d49;
-    }
-
-    .listen {
-      background: var(--yellow);
-      color: #211704;
-      border-color: #9c7d26;
-    }
-
-    .recording {
-      background: var(--red);
-      border-color: #9b3838;
-      color: #fff;
-    }
-
-    .chips {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
+    .quick {
+      display: flex;
+      flex-wrap: wrap;
       gap: 8px;
     }
 
-    .chips button {
-      height: 46px;
-      padding: 0 8px;
-      font-size: 13px;
-    }
-
-    .switch-row {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 8px;
-    }
-
-    .switch-row button {
-      height: 64px;
-      font-size: 18px;
-      letter-spacing: 1px;
-    }
-
-    .switch-row button.on {
-      background: var(--red);
-      border-color: #9b3838;
-      color: #fff;
-    }
-
-    details.advanced {
-      border: 2px solid var(--line);
-      background: #0c1418;
-    }
-
-    details.advanced > summary {
+    .quick button {
+      height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      padding: 0 12px;
       cursor: pointer;
-      padding: 8px 12px;
-      color: var(--muted);
-      font-size: 12px;
-      list-style: none;
-      user-select: none;
-    }
-
-    details.advanced[open] > summary {
-      border-bottom: 1px solid var(--line);
       color: var(--ink);
+      font-weight: 600;
     }
 
-    details.advanced > summary::-webkit-details-marker { display: none; }
+    details {
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+    }
 
-    details.advanced .mic-row,
-    details.advanced .log {
-      border: none;
-      margin: 0;
+    summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .settings {
+      margin-top: 12px;
+      display: grid;
+      gap: 12px;
     }
 
     .log {
-      min-height: 0;
+      margin-top: 12px;
+      max-height: 160px;
       overflow: auto;
-      max-height: 180px;
-      background: #090d10;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fbfcfd;
       color: var(--muted);
       padding: 10px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
       white-space: pre-wrap;
-      font-size: 12px;
     }
 
-    .footer {
-      color: var(--yellow);
-      font-size: 12px;
-      line-height: 1.35;
-    }
-
-    @keyframes idle {
-      0%, 100% { transform: translateY(0); }
-      50% { transform: translateY(-7px); }
-    }
-
-    @keyframes blink {
-      0%, 88%, 100% { opacity: 1; }
-      90%, 94% { opacity: .2; }
-    }
-
-    @keyframes talk {
-      0%, 100% { opacity: 1; transform: scaleY(1); }
-      50% { opacity: .6; transform: scaleY(.45); }
-    }
-
-    @keyframes bars {
-      0% { height: 8px; }
-      25% { height: 28px; }
-      50% { height: 48px; }
-      75% { height: 18px; }
-      100% { height: 8px; }
-    }
-
-    @media (max-width: 760px) and (orientation: portrait) and (pointer: coarse) {
-      body::before {
-        content: "rotate phone";
-        position: fixed;
-        inset: 0;
-        display: grid;
-        place-items: center;
-        z-index: 10;
-        background: var(--bg);
-        color: var(--yellow);
-        font-size: 28px;
-        text-transform: uppercase;
-      }
-    }
-
-    @media (max-width: 860px) and (orientation: landscape) {
-      html,
-      body {
-        overflow: auto;
-      }
-
-      .shell {
-        height: calc(100dvh - 20px);
-        min-height: 0;
-        grid-template-columns: 38% 1fr;
-        gap: 10px;
-        padding: 10px;
-      }
-
-      .console {
-        padding: 10px;
-        gap: 8px;
-      }
-
-      .console {
-        min-height: 0;
-      }
-
-      .input-row,
-      .chips,
-      .switch-row {
-        gap: 6px;
-      }
-
-      .chips {
-        grid-template-columns: repeat(4, 1fr);
-      }
-
-      .chips button {
-        height: 38px;
-      }
-
-      .switch-row button {
-        height: 42px;
-      }
-
-      input,
-      button {
-        height: 46px;
-        font-size: 14px;
-      }
-
-      .status {
-        min-width: 128px;
-        font-size: 12px;
-      }
-    }
-
-    /* Live interim transcription glow */
-    input.live {
-      border-color: var(--cyan);
-      animation: livePulse 1.2s ease-in-out infinite;
-    }
-    @keyframes livePulse {
-      0%, 100% { box-shadow: 0 4px 0 var(--shadow), 0 0 0 2px rgba(103,210,255,.4); }
-      50% { box-shadow: 0 4px 0 var(--shadow), 0 0 0 7px rgba(103,210,255,.12); }
-    }
-
-    /* Big live transcript overlay */
-    #liveText {
-      min-height: 96px;
-      padding: 14px 16px;
-      font-size: clamp(22px, 4vw, 40px);
-      font-weight: 700;
-      color: var(--muted);
-      background: rgba(103,210,255,.06);
-      border: 2px dashed rgba(103,210,255,.25);
-      letter-spacing: .4px;
-      text-transform: lowercase;
-      opacity: 1;
-      transition: color .15s, border-color .15s;
-      line-height: 1.2;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      text-align: center;
-    }
-    #liveText.show {
-      color: var(--cyan);
-      border-color: rgba(103,210,255,.55);
-      animation: livePulse 1.2s ease-in-out infinite;
-    }
-    #liveText.locked {
-      color: var(--green);
-      border-color: rgba(101,212,110,.6);
-      background: rgba(101,212,110,.08);
-      animation: none;
-    }
-
-    /* Thinking mode (during fetch to /api/intent) */
-    .thinking .body { background: var(--cyan); animation: thinkPulse 1s ease-in-out infinite; }
-    .thinking .eye  { background: var(--cyan); animation: thinkBlink .55s steps(2) infinite; }
-    .thinking .mouth { background: var(--cyan); animation: thinkPulse .8s ease-in-out infinite; }
-    .thinking.bot   { animation: thinkBob 1.2s ease-in-out infinite; }
-    .thinking .bar  { background: var(--cyan); animation: thinkBars 600ms ease-in-out infinite; }
-    @keyframes thinkPulse {
-      0%, 100% { opacity: .95; transform: scale(1); }
-      50%      { opacity: .35; transform: scale(.85); }
-    }
-    @keyframes thinkBlink {
-      0%, 100% { opacity: 1; }
-      50%      { opacity: .2; }
-    }
-    @keyframes thinkBob {
-      0%, 100% { transform: translateY(0) rotate(-2deg); }
-      50%      { transform: translateY(-10px) rotate(2deg); }
-    }
-    @keyframes thinkBars {
-      0%, 100% { height: 10px; }
-      50%      { height: 36px; }
-    }
-
-    /* Mic picker row */
-    .mic-row {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 6px;
-    }
-    #micPicker {
-      height: 42px;
-      border: 2px solid var(--line);
-      background: #0b1114;
-      color: var(--ink);
-      font-family: inherit;
-      font-size: 13px;
-      padding: 0 10px;
-      box-shadow: 0 4px 0 var(--shadow);
-    }
-    .input-row.single {
-      grid-template-columns: 1fr;
-    }
-
-    /* Animated trailing dots for status text */
-    .dots::after {
-      content: '';
-      display: inline-block;
-      width: 1.4em;
-      text-align: left;
-      animation: dotcycle 1.1s steps(4) infinite;
-    }
-    @keyframes dotcycle {
-      0%   { content: ''; }
-      25%  { content: '.'; }
-      50%  { content: '..'; }
-      75%  { content: '...'; }
-      100% { content: ''; }
+    @media (max-width: 640px) {
+      body { padding: 12px; }
+      main { padding: 16px; }
+      header, .result, .manual { display: grid; grid-template-columns: 1fr; }
+      .status { min-width: 0; }
     }
   </style>
 </head>
 <body>
-  <main class="shell">
-    <section class="stage" aria-label="Animated voice avatar">
-      <div class="bot" id="bot" aria-hidden="true"></div>
-      <div class="wave idle-bars" id="wave" aria-hidden="true"></div>
-      <div class="scanline"></div>
-    </section>
+  <main>
+    <header>
+      <h1>CS603 Voice Intent</h1>
+      <div class="status" id="status">Checking ROS</div>
+    </header>
 
-    <section class="console">
-      <div class="top">
-        <h1>Sam</h1>
-        <div class="status" id="status">BOOTING...</div>
+    <section class="grid" aria-label="Voice intent controls">
+      <button class="ptt" id="talkBtn" type="button">Hold to Talk</button>
+
+      <div class="result">
+        <div class="field">
+          <span class="label">Transcript</span>
+          <div class="value" id="transcriptText">No speech yet</div>
+        </div>
+        <div class="field">
+          <span class="label">Intent</span>
+          <div class="value intent" id="intentText">-</div>
+        </div>
       </div>
 
-      <div id="liveText" aria-live="polite">say something</div>
-
-      <div class="switch-row">
-        <button id="liveBtn">🎤 tap to listen</button>
+      <div class="manual">
+        <input id="manualText" type="text" autocomplete="off" placeholder="Type a phrase, e.g. stop">
+        <button class="secondary" id="sendTextBtn" type="button">Send Text</button>
       </div>
 
-      <details class="advanced">
-        <summary>⚙ settings</summary>
-        <div class="mic-row">
+      <div class="quick" aria-label="Quick commands">
+        <button type="button" data-phrase="follow me">follow me</button>
+        <button type="button" data-phrase="come here">come here</button>
+        <button type="button" data-phrase="stop">stop</button>
+        <button type="button" data-phrase="red light">red light</button>
+      </div>
+
+      <details>
+        <summary>Settings and log</summary>
+        <div class="settings">
           <select id="micPicker" aria-label="Select microphone"></select>
+          <div class="log" id="log"></div>
         </div>
       </details>
-
-      <details class="advanced">
-        <summary>▸ event log</summary>
-        <div class="log" id="log"></div>
-      </details>
-
-      <div class="footer">say "follow me", "stop", or "come over"</div>
-      <input id="transcript" type="hidden">
     </section>
   </main>
 
   <script>
+    const demoToken = "__CS603_VOICE_DEMO_TOKEN__";
     const statusEl = document.getElementById("status");
-    const transcriptEl = document.getElementById("transcript");
-    const logEl = document.getElementById("log");
-    const botEl = document.getElementById("bot");
-    const waveEl = document.getElementById("wave");
-    const liveTextEl = document.getElementById("liveText");
-    const whisperEl = document.getElementById("whisperBtn");
+    const talkBtn = document.getElementById("talkBtn");
+    const transcriptTextEl = document.getElementById("transcriptText");
+    const intentTextEl = document.getElementById("intentText");
+    const manualTextEl = document.getElementById("manualText");
+    const sendTextBtn = document.getElementById("sendTextBtn");
     const micPickerEl = document.getElementById("micPicker");
-    let mediaRecorder = null;
-    let recordedChunks = [];
-    let whisperBusy = false;
+    const logEl = document.getElementById("log");
+
     let selectedMicId = "";
+    let mediaRecorder = null;
+    let mediaStream = null;
+    let recordedChunks = [];
+    let busy = false;
+    let recording = false;
+    let recordStartedAt = 0;
+
+    function setStatus(text, mode) {
+      statusEl.textContent = text;
+      statusEl.classList.toggle("ok", mode === "ok");
+      statusEl.classList.toggle("busy", mode === "busy");
+      statusEl.classList.toggle("err", mode === "err");
+    }
+
+    function log(line) {
+      const time = new Date().toLocaleTimeString();
+      logEl.textContent = `[${time}] ${line}\n` + logEl.textContent;
+    }
+
+    function setResult(transcript, intent) {
+      transcriptTextEl.textContent = transcript || "No speech detected";
+      intentTextEl.textContent = intent || "-";
+    }
+
+    async function health() {
+      try {
+        const res = await fetch("/api/health");
+        const data = await res.json();
+        if (data.ok) {
+          setStatus("ROS Ready", "ok");
+        } else {
+          setStatus("Bridge Error", "err");
+          log(data.error || "health check failed");
+        }
+      } catch (error) {
+        setStatus("Offline", "err");
+        log(`health error: ${error.message || error}`);
+      }
+    }
 
     async function populateMicPicker() {
       try {
-        // Need a one-time mic permission for device labels to populate.
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({audio: true});
-          stream.getTracks().forEach((track) => track.stop());
-        } catch (_permErr) {
-          // user may decline; we'll still list devices, just without labels
-        }
         const devices = await navigator.mediaDevices.enumerateDevices();
         const mics = devices.filter((device) => device.kind === "audioinput");
         micPickerEl.innerHTML = "";
@@ -560,94 +318,114 @@
           opt.textContent = mic.label || `Microphone ${index + 1}`;
           micPickerEl.appendChild(opt);
         });
-        log(`mic picker: ${mics.length} input(s) found`);
       } catch (error) {
         log(`mic picker error: ${error.message || error}`);
       }
     }
 
-    if (micPickerEl) {
-      micPickerEl.addEventListener("change", () => {
-        selectedMicId = micPickerEl.value;
-        log(`mic selected: ${micPickerEl.options[micPickerEl.selectedIndex].textContent}`);
-      });
-      populateMicPicker();
-    }
-    const demoToken = "__CS603_VOICE_DEMO_TOKEN__";
-
-    const pixels = [
-      "...eee...",
-      ".eebbbee.",
-      ".ebbbbbe.",
-      "ebbbbbbbe",
-      "ebbbmbbbe",
-      "ebbbbbbbe",
-      ".ebbbbbe.",
-      ".eebbbee.",
-      "...eee..."
-    ];
-
-    const bars = 18;
-    botEl.innerHTML = pixels.flatMap((row) => row.split("")).map((cell) => {
-      if (cell === "e") return "<span class='px edge'></span>";
-      if (cell === "b") return "<span class='px body'></span>";
-      if (cell === "m") return "<span class='px mouth'></span>";
-      return "<span class='px'></span>";
-    }).join("");
-    waveEl.innerHTML = Array.from({length: bars}, () => "<span class='bar'></span>").join("");
-
-    function setMode(mode) {
-      botEl.classList.toggle("active", mode === "active");
-      botEl.classList.toggle("warn", mode === "warn");
-      botEl.classList.toggle("thinking", mode === "thinking");
-      waveEl.classList.toggle("thinking", mode === "thinking");
-      waveEl.classList.toggle("idle-bars", mode !== "active" && mode !== "thinking");
+    async function requestMic() {
+      const audioConstraint = selectedMicId ? {deviceId: {exact: selectedMicId}} : true;
+      return navigator.mediaDevices.getUserMedia({audio: audioConstraint});
     }
 
-    function setStatus(text, color, animateDots) {
-      statusEl.textContent = text;
-      statusEl.style.color = color;
-      statusEl.classList.toggle("dots", !!animateDots);
+    async function startRecording(event) {
+      if (event) event.preventDefault();
+      if (busy || recording) return;
+
+      try {
+        mediaStream = await requestMic();
+        recordedChunks = [];
+        const opts = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? {mimeType: "audio/webm;codecs=opus"}
+          : (MediaRecorder.isTypeSupported("audio/webm") ? {mimeType: "audio/webm"} : {});
+        mediaRecorder = new MediaRecorder(mediaStream, opts);
+        mediaRecorder.ondataavailable = (evt) => {
+          if (evt.data && evt.data.size > 0) recordedChunks.push(evt.data);
+        };
+        mediaRecorder.onstop = uploadRecording;
+        mediaRecorder.start();
+        recordStartedAt = Date.now();
+        recording = true;
+        talkBtn.classList.add("recording");
+        talkBtn.textContent = "Release to Send";
+        setStatus("Recording", "busy");
+        setResult("", "");
+      } catch (error) {
+        setStatus("Mic Blocked", "err");
+        log(`mic error: ${error.message || error}`);
+      }
     }
 
-    function setLiveText(text, locked) {
-      const trimmed = (text || "").trim();
-      if (!trimmed) {
-        liveTextEl.textContent = liveActive ? "listening..." : "say something";
-        liveTextEl.classList.remove("show", "locked");
+    function stopRecording(event) {
+      if (event) event.preventDefault();
+      if (!recording || !mediaRecorder || mediaRecorder.state !== "recording") return;
+      recording = false;
+      mediaRecorder.stop();
+      talkBtn.classList.remove("recording");
+      talkBtn.textContent = "Hold to Talk";
+      setStatus("Transcribing", "busy");
+    }
+
+    async function uploadRecording() {
+      const durationMs = Date.now() - recordStartedAt;
+      const mime = mediaRecorder?.mimeType || "audio/webm";
+      const blob = new Blob(recordedChunks, {type: mime});
+      cleanupStream();
+      recordedChunks = [];
+
+      if (durationMs < 300 || blob.size === 0) {
+        setStatus("Too Short", "err");
+        log("recording ignored: too short");
         return;
       }
-      liveTextEl.textContent = trimmed;
-      liveTextEl.classList.add("show");
-      liveTextEl.classList.toggle("locked", !!locked);
-    }
 
-    function log(line) {
-      const time = new Date().toLocaleTimeString();
-      logEl.textContent = `[${time}] ${line}\n` + logEl.textContent;
-    }
-
-    async function health() {
+      busy = true;
+      talkBtn.disabled = true;
       try {
-        const res = await fetch("/api/health");
+        const res = await fetch("/api/transcribe", {
+          method: "POST",
+          headers: {
+            "Content-Type": mime,
+            "X-CS603-Voice-Token": demoToken
+          },
+          body: blob
+        });
         const data = await res.json();
-        statusEl.textContent = data.ok ? "ROS READY" : "BRIDGE ERROR";
-        statusEl.style.color = data.ok ? "var(--green)" : "var(--red)";
-        if (!data.ok) log(data.error || "health check failed");
+        if (!res.ok || !data.ok) throw new Error(data.error || "transcription failed");
+
+        const transcript = (data.transcript || "").trim();
+        setResult(transcript, data.intent);
+        if (data.intent) {
+          setStatus(data.intent, "ok");
+          log(`${JSON.stringify(transcript)} -> ${data.intent}`);
+        } else {
+          setStatus(transcript ? "Transcribed" : "Empty", transcript ? "ok" : "err");
+          log(transcript ? `transcript: ${JSON.stringify(transcript)}` : "empty transcript");
+        }
       } catch (error) {
-        statusEl.textContent = "OFFLINE";
-        statusEl.style.color = "var(--red)";
-        log(String(error));
+        setStatus("Failed", "err");
+        log(`transcribe error: ${error.message || error}`);
+      } finally {
+        busy = false;
+        talkBtn.disabled = false;
       }
+    }
+
+    function cleanupStream() {
+      if (mediaStream) {
+        mediaStream.getTracks().forEach((track) => track.stop());
+      }
+      mediaStream = null;
+      mediaRecorder = null;
     }
 
     async function publishTranscript(text) {
       const transcript = text.trim();
-      if (!transcript) return;
-      transcriptEl.classList.remove("live");
-      setLiveText(transcript, true);
-      setMode("thinking");
-      setStatus("THINKING", "var(--cyan)", true);
+      if (!transcript || busy) return;
+
+      busy = true;
+      sendTextBtn.disabled = true;
+      setStatus("Publishing", "busy");
       try {
         const res = await fetch("/api/intent", {
           method: "POST",
@@ -659,299 +437,47 @@
         });
         const data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.error || "publish failed");
-        setMode("active");
-        setStatus(data.intent, "var(--green)", false);
-        log(`${JSON.stringify(data.commandText || data.transcript)} -> ${data.intent}`);
-        setTimeout(() => {
-          setMode("idle");
-          setLiveText("", false);
-        }, 1400);
+        setResult(data.commandText || data.transcript || transcript, data.intent);
+        setStatus(data.intent || "Published", "ok");
+        log(`${JSON.stringify(data.commandText || transcript)} -> ${data.intent}`);
       } catch (error) {
-        setStatus("FAILED", "var(--red)", false);
-        log(String(error));
-        setMode("warn");
-        setTimeout(() => setLiveText("", false), 1500);
+        setStatus("Failed", "err");
+        log(`publish error: ${error.message || error}`);
+      } finally {
+        busy = false;
+        sendTextBtn.disabled = false;
       }
     }
 
+    talkBtn.addEventListener("pointerdown", startRecording);
+    talkBtn.addEventListener("pointerup", stopRecording);
+    talkBtn.addEventListener("pointercancel", stopRecording);
+    talkBtn.addEventListener("pointerleave", stopRecording);
+
+    document.addEventListener("keydown", (event) => {
+      if (event.code === "Space" && document.activeElement !== manualTextEl) startRecording(event);
+    });
+    document.addEventListener("keyup", (event) => {
+      if (event.code === "Space" && document.activeElement !== manualTextEl) stopRecording(event);
+    });
+
+    sendTextBtn.addEventListener("click", () => publishTranscript(manualTextEl.value));
+    manualTextEl.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") publishTranscript(manualTextEl.value);
+    });
     document.querySelectorAll("[data-phrase]").forEach((button) => {
       button.addEventListener("click", () => {
-        transcriptEl.value = button.dataset.phrase;
-        publishTranscript(transcriptEl.value);
+        manualTextEl.value = button.dataset.phrase;
+        publishTranscript(button.dataset.phrase);
       });
     });
-
-    transcriptEl.addEventListener("keydown", (event) => {
-      if (event.key === "Enter") publishTranscript(transcriptEl.value);
+    micPickerEl.addEventListener("change", () => {
+      selectedMicId = micPickerEl.value;
+      log(`mic selected: ${micPickerEl.options[micPickerEl.selectedIndex].textContent}`);
     });
-
-    async function whisperStart() {
-      if (whisperBusy || (mediaRecorder && mediaRecorder.state === "recording")) return;
-      try {
-        const audioConstraint = selectedMicId ? {deviceId: {exact: selectedMicId}} : true;
-        const stream = await navigator.mediaDevices.getUserMedia({audio: audioConstraint});
-        recordedChunks = [];
-        const opts = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-          ? {mimeType: "audio/webm;codecs=opus"}
-          : (MediaRecorder.isTypeSupported("audio/webm") ? {mimeType: "audio/webm"} : {});
-        mediaRecorder = new MediaRecorder(stream, opts);
-        mediaRecorder.ondataavailable = (event) => {
-          if (event.data && event.data.size > 0) recordedChunks.push(event.data);
-        };
-        mediaRecorder.onstop = async () => {
-          stream.getTracks().forEach((track) => track.stop());
-          const mime = mediaRecorder.mimeType || "audio/webm";
-          const blob = new Blob(recordedChunks, {type: mime});
-          recordedChunks = [];
-          await whisperUpload(blob, mime);
-        };
-        mediaRecorder.start();
-        whisperEl.classList.add("on");
-        whisperEl.textContent = "Whisper: recording — tap to stop";
-        setStatus("RECORDING", "var(--yellow)", true);
-        setMode("active");
-        setLiveText("", false);
-        log("whisper recording started");
-      } catch (error) {
-        log(`mic error: ${error.message || error}`);
-        setStatus("MIC BLOCKED", "var(--red)", false);
-        setMode("warn");
-      }
-    }
-
-    function whisperStop() {
-      if (mediaRecorder && mediaRecorder.state === "recording") {
-        mediaRecorder.stop();
-      }
-    }
-
-    async function whisperUpload(blob, mime) {
-      whisperBusy = true;
-      whisperEl.classList.remove("on");
-      whisperEl.textContent = "Whisper: transcribing...";
-      whisperEl.disabled = true;
-      setStatus("TRANSCRIBING", "var(--cyan)", true);
-      setMode("thinking");
-      try {
-        const res = await fetch("/api/transcribe", {
-          method: "POST",
-          headers: {
-            "Content-Type": mime || "audio/webm",
-            "X-CS603-Voice-Token": demoToken
-          },
-          body: blob
-        });
-        const data = await res.json();
-        if (!res.ok || !data.ok) throw new Error(data.error || "whisper failed");
-        const transcript = (data.transcript || "").trim();
-        transcriptEl.value = transcript;
-        if (!transcript) {
-          setLiveText("(no speech detected)", false);
-          setStatus("EMPTY", "var(--yellow)", false);
-          setMode("warn");
-        } else {
-          setLiveText(transcript, true);
-          if (data.intent) {
-            setStatus(data.intent, "var(--green)", false);
-            setMode("active");
-            log(`whisper: ${JSON.stringify(transcript)} -> ${data.intent}`);
-          } else {
-            setStatus("DONE", "var(--green)", false);
-            log(`whisper: ${JSON.stringify(transcript)}`);
-          }
-          setTimeout(() => {
-            setMode("idle");
-            setLiveText("", false);
-          }, 1800);
-        }
-      } catch (error) {
-        log(`whisper error: ${error.message || error}`);
-        setStatus("WHISPER ERR", "var(--red)", false);
-        setMode("warn");
-      } finally {
-        whisperBusy = false;
-        whisperEl.disabled = false;
-        whisperEl.textContent = "Whisper: tap to record";
-      }
-    }
-
-    if (whisperEl) {
-      whisperEl.addEventListener("click", () => {
-        if (mediaRecorder && mediaRecorder.state === "recording") {
-          whisperStop();
-        } else {
-          whisperStart();
-        }
-      });
-    }
-
-    // ---- Live VAD mode (continuous mic + auto-send on 1s silence) ----
-    const liveEl = document.getElementById("liveBtn");
-    const SPEECH_THRESHOLD = 22;     // 0-255 byte avg, tune for your mic (raised: 14 picked up breath)
-    const SILENCE_MS = 1000;         // 1s of silence ends an utterance
-    const MIN_UTTERANCE_MS = 1200;   // Whisper hallucinates on clips <1.2s
-    const POLL_INTERVAL_MS = 100;
-    let liveActive = false;
-    let liveStream = null;
-    let liveAudioCtx = null;
-    let liveAnalyser = null;
-    let liveRecorder = null;
-    let liveChunks = [];
-    let liveLoopHandle = null;
-    let liveSilenceMs = 0;
-    let liveHadSpeech = false;
-    let liveUtteranceStart = 0;
-
-    async function liveStart() {
-      if (liveActive) return;
-      try {
-        const audioConstraint = selectedMicId ? {deviceId: {exact: selectedMicId}} : true;
-        liveStream = await navigator.mediaDevices.getUserMedia({audio: audioConstraint});
-        liveAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        const source = liveAudioCtx.createMediaStreamSource(liveStream);
-        liveAnalyser = liveAudioCtx.createAnalyser();
-        liveAnalyser.fftSize = 1024;
-        source.connect(liveAnalyser);
-        liveActive = true;
-        liveEl.classList.add("on");
-        liveEl.textContent = "Live: listening — tap to stop";
-        setStatus("LIVE", "var(--yellow)", true);
-        setMode("active");
-        setLiveText("", false);
-        log("live VAD started");
-        startLiveUtterance();
-        liveLoopHandle = setInterval(monitorLiveLevel, POLL_INTERVAL_MS);
-      } catch (error) {
-        log(`live mic error: ${error.message || error}`);
-        setStatus("MIC BLOCKED", "var(--red)", false);
-        setMode("warn");
-        liveActive = false;
-      }
-    }
-
-    function startLiveUtterance() {
-      if (!liveStream || !liveActive) return;
-      liveChunks = [];
-      liveSilenceMs = 0;
-      liveHadSpeech = false;
-      liveUtteranceStart = Date.now();
-      const opts = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? {mimeType: "audio/webm;codecs=opus"}
-        : (MediaRecorder.isTypeSupported("audio/webm") ? {mimeType: "audio/webm"} : {});
-      liveRecorder = new MediaRecorder(liveStream, opts);
-      liveRecorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) liveChunks.push(event.data);
-      };
-      liveRecorder.onstop = async () => {
-        const duration = Date.now() - liveUtteranceStart;
-        const mime = liveRecorder.mimeType || "audio/webm";
-        const blob = new Blob(liveChunks, {type: mime});
-        liveChunks = [];
-        if (liveHadSpeech && duration >= MIN_UTTERANCE_MS && blob.size > 0) {
-          liveTranscribeChunk(blob, mime);
-        }
-        if (liveActive) startLiveUtterance();
-      };
-      liveRecorder.start();
-    }
-
-    function monitorLiveLevel() {
-      if (!liveAnalyser || !liveActive) return;
-      const buf = new Uint8Array(liveAnalyser.frequencyBinCount);
-      liveAnalyser.getByteFrequencyData(buf);
-      let sum = 0;
-      for (let i = 0; i < buf.length; i += 1) sum += buf[i];
-      const avg = sum / buf.length;
-      if (avg > SPEECH_THRESHOLD) {
-        liveSilenceMs = 0;
-        if (!liveHadSpeech) {
-          liveHadSpeech = true;
-          liveUtteranceStart = Date.now();
-        }
-      } else {
-        liveSilenceMs += POLL_INTERVAL_MS;
-        if (liveHadSpeech && liveSilenceMs >= SILENCE_MS &&
-            liveRecorder && liveRecorder.state === "recording") {
-          liveRecorder.stop();
-        }
-      }
-    }
-
-    async function liveTranscribeChunk(blob, mime) {
-      setStatus("TRANSCRIBING", "var(--cyan)", true);
-      setMode("thinking");
-      try {
-        const res = await fetch("/api/transcribe", {
-          method: "POST",
-          headers: {
-            "Content-Type": mime,
-            "X-CS603-Voice-Token": demoToken
-          },
-          body: blob
-        });
-        const data = await res.json();
-        if (!res.ok || !data.ok) throw new Error(data.error || "whisper failed");
-        const transcript = (data.transcript || "").trim();
-        if (transcript) {
-          transcriptEl.value = transcript;
-          setLiveText(transcript, true);
-          if (data.intent) {
-            setStatus(data.intent, "var(--green)", false);
-            log(`live: ${JSON.stringify(transcript)} -> ${data.intent}`);
-          } else {
-            setStatus("DONE", "var(--green)", false);
-            log(`live: ${JSON.stringify(transcript)}`);
-          }
-          setMode("active");
-        } else {
-          log("live: (empty transcript)");
-        }
-        if (liveActive) {
-          setTimeout(() => {
-            if (liveActive) {
-              setStatus("LIVE", "var(--yellow)", true);
-              setMode("active");
-            }
-          }, 900);
-        }
-      } catch (error) {
-        log(`live transcribe error: ${error.message || error}`);
-        setStatus("ERR", "var(--red)", false);
-        setMode("warn");
-      }
-    }
-
-    function liveStop() {
-      liveActive = false;
-      if (liveLoopHandle) { clearInterval(liveLoopHandle); liveLoopHandle = null; }
-      if (liveRecorder && liveRecorder.state === "recording") {
-        try { liveRecorder.stop(); } catch (_err) { /* ignore */ }
-      }
-      liveRecorder = null;
-      if (liveStream) {
-        liveStream.getTracks().forEach((track) => track.stop());
-        liveStream = null;
-      }
-      if (liveAudioCtx) {
-        try { liveAudioCtx.close(); } catch (_err) { /* ignore */ }
-        liveAudioCtx = null;
-      }
-      liveAnalyser = null;
-      liveEl.classList.remove("on");
-      liveEl.textContent = "Live: tap to start";
-      setStatus("READY", "var(--green)", false);
-      setMode("idle");
-      setLiveText("", false);
-      log("live VAD stopped");
-    }
-
-    if (liveEl) {
-      liveEl.addEventListener("click", () => {
-        if (liveActive) liveStop(); else liveStart();
-      });
-    }
 
     health();
+    populateMicPicker();
   </script>
 </body>
 </html>

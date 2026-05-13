@@ -218,21 +218,22 @@ Open this URL from the Windows browser:
 http://127.0.0.1:8765
 ```
 
-In the UI, click `tap to listen`, speak, and pause. The transcript appears and
-the intent publishes automatically.
+In the UI, hold `Hold to Talk`, speak, and release. The transcript appears and
+the intent publishes automatically after transcription.
 
-Configure model, binary, or workspace setup via env vars if needed:
+Configure model, device, or workspace setup via env vars if needed:
 
 ```bash
 CS603_WHISPER_MODEL=base.en \
-CS603_WHISPER_BIN=whisper \
+CS603_WHISPER_DEVICE=cpu \
 CS603_ROS_SETUP="$ROBOMASTER_WS/install/setup.bash" \
 python3 tools/voice_web_demo/server.py --host 0.0.0.0 --port 8765
 ```
 
-Latency: the first call is slower because the model loads. Use `tiny.en` for
-fast practice, `base.en` for a better live-demo balance, or `small.en` for more
-accuracy at the cost of latency.
+Latency: server startup is slower because the model loads once before requests
+are served. After that, push-to-talk requests reuse the loaded model. Use
+`tiny.en` for fast practice, `base.en` for a better live-demo balance, or
+`small.en` for more accuracy at the cost of latency.
 
 ### Handoff status
 

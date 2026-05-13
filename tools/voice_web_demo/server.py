@@ -11,18 +11,18 @@ import argparse
 import json
 import os
 import secrets
-import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 
-WHISPER_BIN = os.environ.get("CS603_WHISPER_BIN", "whisper")
 WHISPER_MODEL = os.environ.get("CS603_WHISPER_MODEL", "base.en")
+WHISPER_DEVICE = os.environ.get("CS603_WHISPER_DEVICE", "")
 DEFAULT_WORKSPACE = Path(os.environ.get("ROBOMASTER_WS", "~/robomaster_ws")).expanduser()
 DEFAULT_ROS_SETUP_FILES = (
     "/opt/ros/humble/setup.bash",
@@ -53,6 +53,13 @@ class VoiceIntentServer(ThreadingHTTPServer):
         self.ros_setup_files = ros_setup_files
         self.token = token
         self.allow_lan_publish = allow_lan_publish
+        self.whisper_transcriber = WhisperTranscriber(WHISPER_MODEL, WHISPER_DEVICE)
+
+    def load_whisper(self) -> None:
+        self.whisper_transcriber.load()
+
+    def transcribe(self, audio_path: str) -> str:
+        return self.whisper_transcriber.transcribe(audio_path)
 
 
 class VoiceIntentHandler(BaseHTTPRequestHandler):
@@ -132,7 +139,7 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
             with open(tmp_audio, "wb") as fh:
                 fh.write(data)
 
-            text = run_whisper(tmp_audio)
+            text = self.server.transcribe(tmp_audio)
             transcript = text.strip()
             response: dict[str, Any] = {
                 "ok": True,
@@ -260,45 +267,38 @@ def request_is_authorized(headers: Any, expected_token: str) -> bool:
     return token_header_ok(headers, expected_token)
 
 
-def run_whisper(audio_path: str) -> str:
-    whisper_cmd = shutil.which(WHISPER_BIN) or (WHISPER_BIN if os.path.exists(WHISPER_BIN) else "")
-    if not whisper_cmd:
-        raise RuntimeError(f"whisper binary not found at {WHISPER_BIN}")
-    out_dir = tempfile.mkdtemp(prefix="cs603_whisper_out_")
-    try:
-        cmd = [
-            whisper_cmd,
-            audio_path,
-            "--model", WHISPER_MODEL,
-            "--language", "en",
-            "--task", "transcribe",
-            "--fp16", "False",
-            "--temperature", "0.0",
-            "--no_speech_threshold", "0.6",
-            "--logprob_threshold", "-1.0",
-            "--condition_on_previous_text", "False",
-            "--output_dir", out_dir,
-            "--output_format", "txt",
-            "--verbose", "False",
-        ]
-        result = subprocess.run(
-            cmd,
-            text=True,
-            capture_output=True,
-            timeout=60,
-            check=False,
-            env=whisper_subprocess_env(),
-        )
-        if result.returncode != 0:
-            raise RuntimeError((result.stderr or result.stdout or "whisper failed").strip()[-1500:])
-        base = os.path.splitext(os.path.basename(audio_path))[0]
-        txt_path = os.path.join(out_dir, base + ".txt")
-        if not os.path.exists(txt_path):
-            return ""
-        with open(txt_path, encoding="utf-8") as fh:
-            return fh.read()
-    finally:
-        shutil.rmtree(out_dir, ignore_errors=True)
+class WhisperTranscriber:
+    def __init__(self, model_name: str, device: str = "") -> None:
+        self.model_name = model_name
+        self.device = device.strip() or None
+        self._model = None
+        self._lock = threading.Lock()
+
+    def load(self) -> None:
+        with self._lock:
+            if self._model is not None:
+                return
+            prepare_whisper_import()
+            import whisper  # noqa: PLC0415 - load only when the server starts.
+
+            kwargs = {"device": self.device} if self.device else {}
+            self._model = whisper.load_model(self.model_name, **kwargs)
+
+    def transcribe(self, audio_path: str) -> str:
+        self.load()
+        with self._lock:
+            result = self._model.transcribe(
+                audio_path,
+                language="en",
+                task="transcribe",
+                fp16=False,
+                temperature=0.0,
+                no_speech_threshold=0.6,
+                logprob_threshold=-1.0,
+                condition_on_previous_text=False,
+                verbose=False,
+            )
+        return str(result.get("text", ""))
 
 
 def same_host_if_present(url: str | None, host: str) -> bool:
@@ -308,15 +308,11 @@ def same_host_if_present(url: str | None, host: str) -> bool:
     return parsed.netloc == host
 
 
-def whisper_subprocess_env() -> dict[str, str]:
-    env = os.environ.copy()
-    existing_pythonpath = env.get("PYTHONPATH", "")
-    pythonpath_parts = [str(PYTHON_SHIMS_PATH)]
-    if existing_pythonpath:
-        pythonpath_parts.append(existing_pythonpath)
-    env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
-    env.setdefault("NUMBA_JIT_COVERAGE", "0")
-    return env
+def prepare_whisper_import() -> None:
+    shim_path = str(PYTHON_SHIMS_PATH)
+    if shim_path not in sys.path:
+        sys.path.insert(0, shim_path)
+    os.environ.setdefault("NUMBA_JIT_COVERAGE", "0")
 
 
 def main() -> None:
@@ -348,6 +344,9 @@ def main() -> None:
     print("Publishing /voice_intent with local ros2 CLI after sourcing:")
     for path in ros_setup_files:
         print(f"  {path}")
+    print(f"Loading Whisper model once: {WHISPER_MODEL}")
+    server.load_whisper()
+    print("Whisper model ready")
     if args.allow_lan_publish:
         print("LAN publish enabled for phone demo. Keep motion bridge disabled unless the test area is clear.")
     server.serve_forever()
