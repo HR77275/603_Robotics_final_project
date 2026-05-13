@@ -29,8 +29,8 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'enable_motion',
-            default_value='true',
-            description='Publish non-zero cmd_vel commands when true.',
+            default_value='false',
+            description='Publish non-zero cmd_vel commands only when explicitly true.',
         ),
         DeclareLaunchArgument(
             'target_track_id',

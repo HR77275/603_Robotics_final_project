@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ from urllib.parse import urlparse
 
 WHISPER_BIN = os.environ.get("CS603_WHISPER_BIN", "whisper")
 WHISPER_MODEL = os.environ.get("CS603_WHISPER_MODEL", "base.en")
+STT_BACKEND = os.environ.get("CS603_STT_BACKEND", "auto").strip().lower()
 DEFAULT_WORKSPACE = Path(os.environ.get("ROBOMASTER_WS", "~/robomaster_ws")).expanduser()
 DEFAULT_ROS_SETUP_FILES = (
     "/opt/ros/humble/setup.bash",
@@ -132,22 +134,30 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
             with open(tmp_audio, "wb") as fh:
                 fh.write(data)
 
-            text = run_whisper(tmp_audio)
+            backend = resolve_stt_backend()
+            total_started = time.perf_counter()
+            stt_started = time.perf_counter()
+            text = run_whisper_with_backend(tmp_audio, backend)
+            stt_ms = elapsed_ms(stt_started)
             transcript = text.strip()
             response: dict[str, Any] = {
                 "ok": True,
                 "transcript": transcript,
                 "model": WHISPER_MODEL,
+                "sttBackend": backend,
+                "sttMs": stt_ms,
             }
 
             if transcript:
                 intent = classify_intent(transcript)
                 try:
+                    publish_started = time.perf_counter()
                     result = publish_intent(self.server.ros_setup_files, intent)
                     response.update(
                         {
                             "intent": intent,
                             "commandText": transcript,
+                            "publishMs": elapsed_ms(publish_started),
                             "stdout": result.stdout[-2000:],
                             "stderr": result.stderr[-2000:],
                         }
@@ -156,6 +166,7 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
                     response["intent"] = intent
                     response["publish_error"] = str(pub_exc)
 
+            response["totalMs"] = elapsed_ms(total_started)
             self._send_json(response)
         except Exception as exc:  # noqa: BLE001 - surface demo-time failures.
             self._send_json({"ok": False, "error": str(exc)}, status=500)
@@ -189,6 +200,8 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
             return {
                 "ok": ok,
                 "ros_setup_files": self.server.ros_setup_files,
+                "stt_backend": resolve_stt_backend_quiet(),
+                "stt_model": stt_model_label(resolve_stt_backend_quiet()),
                 "error": "" if ok else (result.stderr or result.stdout).strip(),
             }
         except Exception as exc:  # noqa: BLE001 - demo health endpoint.
@@ -260,7 +273,39 @@ def request_is_authorized(headers: Any, expected_token: str) -> bool:
     return token_header_ok(headers, expected_token)
 
 
+def elapsed_ms(started_at: float) -> int:
+    return int((time.perf_counter() - started_at) * 1000)
+
+
+def resolve_stt_backend_quiet() -> str:
+    try:
+        return resolve_stt_backend()
+    except RuntimeError:
+        return "unavailable"
+
+
+def stt_model_label(backend: str) -> str:
+    return WHISPER_MODEL
+
+
+def resolve_stt_backend() -> str:
+    if STT_BACKEND not in ("auto", "cli", "openai-whisper"):
+        raise RuntimeError(
+            "CS603_STT_BACKEND must be one of: auto, cli"
+        )
+
+    return "openai-whisper-cli"
+
+
 def run_whisper(audio_path: str) -> str:
+    return run_whisper_with_backend(audio_path, resolve_stt_backend())
+
+
+def run_whisper_with_backend(audio_path: str, backend: str) -> str:
+    return run_whisper_cli(audio_path)
+
+
+def run_whisper_cli(audio_path: str) -> str:
     whisper_cmd = shutil.which(WHISPER_BIN) or (WHISPER_BIN if os.path.exists(WHISPER_BIN) else "")
     if not whisper_cmd:
         raise RuntimeError(f"whisper binary not found at {WHISPER_BIN}")

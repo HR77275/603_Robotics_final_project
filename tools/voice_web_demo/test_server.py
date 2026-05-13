@@ -114,5 +114,18 @@ class WhisperEnvironmentTest(unittest.TestCase):
         self.assertEqual(env["NUMBA_JIT_COVERAGE"], "0")
 
 
+class WhisperBackendTest(unittest.TestCase):
+    @mock.patch("server.run_whisper_cli", return_value="stop")
+    def test_auto_backend_uses_existing_whisper_cli(self, cli_mock):
+        with mock.patch.object(server, "STT_BACKEND", "auto"):
+            self.assertEqual(server.run_whisper("/tmp/audio.webm"), "stop")
+        cli_mock.assert_called_once_with("/tmp/audio.webm")
+
+    def test_rejects_removed_backend_names(self):
+        with mock.patch.object(server, "STT_BACKEND", "unsupported-backend"):
+            with self.assertRaisesRegex(RuntimeError, "CS603_STT_BACKEND"):
+                server.run_whisper("/tmp/audio.webm")
+
+
 if __name__ == "__main__":
     unittest.main()

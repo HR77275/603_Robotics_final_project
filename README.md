@@ -123,6 +123,7 @@ Start the local WSL/Ubuntu web bridge:
 cd "$CS603_PROJECT"
 source /opt/ros/humble/setup.bash
 source "$ROBOMASTER_WS/install/setup.bash"
+CS603_STT_BACKEND=auto \
 python3 tools/voice_web_demo/server.py --host 0.0.0.0 --port 8765 --allow-lan-publish --token cs603-demo-local
 ```
 
@@ -132,8 +133,9 @@ Open this in the Windows or Ubuntu browser:
 http://127.0.0.1:8765
 ```
 
-The browser records audio, the WSL server runs local Whisper, and the server
-publishes classified intents on `/voice_intent`.
+The browser records audio, the WSL server runs local STT, publishes classified
+intents on `/voice_intent`, logs STT/ROS latency, and the browser speaks a short
+acknowledgement for the command.
 
 Useful knobs:
 

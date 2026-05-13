@@ -627,6 +627,36 @@
       logEl.textContent = `[${time}] ${line}\n` + logEl.textContent;
     }
 
+    const robotReplies = {
+      CMD_FOLLOW: "Okay. Following you.",
+      CMD_STOP: "Stopping now.",
+      CMD_APPROACH: "Coming closer.",
+      CMD_UNKNOWN: "I did not understand that command."
+    };
+
+    function speakRobot(text) {
+      if (!("speechSynthesis" in window)) return;
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = "en-US";
+      utterance.rate = 1.05;
+      utterance.pitch = 1.0;
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utterance);
+    }
+
+    function speakIntent(intent) {
+      speakRobot(robotReplies[intent] || "Command received.");
+    }
+
+    function latencyLabel(data) {
+      const parts = [];
+      if (data.sttBackend) parts.push(data.sttBackend);
+      if (Number.isFinite(data.sttMs)) parts.push(`${data.sttMs}ms STT`);
+      if (Number.isFinite(data.publishMs)) parts.push(`${data.publishMs}ms ROS`);
+      if (Number.isFinite(data.totalMs)) parts.push(`${data.totalMs}ms total`);
+      return parts.length ? ` (${parts.join(", ")})` : "";
+    }
+
     async function health() {
       try {
         const res = await fetch("/api/health");
@@ -662,6 +692,7 @@
         setMode("active");
         setStatus(data.intent, "var(--green)", false);
         log(`${JSON.stringify(data.commandText || data.transcript)} -> ${data.intent}`);
+        speakIntent(data.intent);
         setTimeout(() => {
           setMode("idle");
           setLiveText("", false);
@@ -669,6 +700,7 @@
       } catch (error) {
         setStatus("FAILED", "var(--red)", false);
         log(String(error));
+        speakRobot("I could not send that command.");
         setMode("warn");
         setTimeout(() => setLiveText("", false), 1500);
       }
@@ -754,10 +786,11 @@
           if (data.intent) {
             setStatus(data.intent, "var(--green)", false);
             setMode("active");
-            log(`whisper: ${JSON.stringify(transcript)} -> ${data.intent}`);
+            log(`whisper: ${JSON.stringify(transcript)} -> ${data.intent}${latencyLabel(data)}`);
+            speakIntent(data.intent);
           } else {
             setStatus("DONE", "var(--green)", false);
-            log(`whisper: ${JSON.stringify(transcript)}`);
+            log(`whisper: ${JSON.stringify(transcript)}${latencyLabel(data)}`);
           }
           setTimeout(() => {
             setMode("idle");
@@ -897,10 +930,11 @@
           setLiveText(transcript, true);
           if (data.intent) {
             setStatus(data.intent, "var(--green)", false);
-            log(`live: ${JSON.stringify(transcript)} -> ${data.intent}`);
+            log(`live: ${JSON.stringify(transcript)} -> ${data.intent}${latencyLabel(data)}`);
+            speakIntent(data.intent);
           } else {
             setStatus("DONE", "var(--green)", false);
-            log(`live: ${JSON.stringify(transcript)}`);
+            log(`live: ${JSON.stringify(transcript)}${latencyLabel(data)}`);
           }
           setMode("active");
         } else {

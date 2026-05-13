@@ -70,7 +70,7 @@ class FollowNode(Node):
         self.declare_parameter('deadband_center_norm', 0.04)
         self.declare_parameter('angular_only_error_norm', 0.18)
         self.declare_parameter('angular_sign', -1.0)
-        self.declare_parameter('enable_motion', True)
+        self.declare_parameter('enable_motion', False)
         self.declare_parameter('require_fsm_active', True)
 
         self.target = None

@@ -200,15 +200,17 @@ the microphone, use `stdin` mode for text tests or the browser web bridge below.
 ### B. WSL Web Bridge (recommended for live demo)
 
 `tools/voice_web_demo/server.py` exposes `/api/transcribe`. A browser records
-audio with MediaRecorder, posts the blob to the WSL server, WSL runs the local
-`whisper` command with no API key, classifies the intent, and publishes directly
-to local ROS 2 with `ros2 topic pub`.
+audio with MediaRecorder, posts the blob to the WSL server, WSL runs local STT
+with no API key, classifies the intent, and publishes directly to local ROS 2
+with `ros2 topic pub`. The UI logs STT/ROS latency and speaks a short command
+acknowledgement through browser speech synthesis.
 
 ```bash
 export ROBOMASTER_WS="${ROBOMASTER_WS:-$HOME/robomaster_ws}"
 cd "$ROBOMASTER_WS/src/603_Robotics_final_project"
 source /opt/ros/humble/setup.bash
 source "$ROBOMASTER_WS/install/setup.bash"
+CS603_STT_BACKEND=auto \
 python3 tools/voice_web_demo/server.py --host 0.0.0.0 --port 8765 --allow-lan-publish --token cs603-demo-local
 ```
 
@@ -224,15 +226,18 @@ the intent publishes automatically.
 Configure model, binary, or workspace setup via env vars if needed:
 
 ```bash
+CS603_STT_BACKEND=auto \
 CS603_WHISPER_MODEL=base.en \
 CS603_WHISPER_BIN=whisper \
 CS603_ROS_SETUP="$ROBOMASTER_WS/install/setup.bash" \
 python3 tools/voice_web_demo/server.py --host 0.0.0.0 --port 8765
 ```
 
-Latency: the first call is slower because the model loads. Use `tiny.en` for
-fast practice, `base.en` for a better live-demo balance, or `small.en` for more
-accuracy at the cost of latency.
+Latency: check the web UI log after each utterance. It prints backend, STT
+milliseconds, ROS publish milliseconds, and total request milliseconds. The
+current checked-in free/local path uses the existing `openai-whisper` CLI. If the
+team decides to pay for OpenAI Realtime for the final demo, keep that as a
+separate branch/PR instead of mixing it into this local bridge.
 
 ### Handoff status
 
