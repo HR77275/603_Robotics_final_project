@@ -4,6 +4,7 @@ from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -18,6 +19,18 @@ def generate_launch_description():
     target_track_id = LaunchConfiguration("target_track_id")
     follow_distance_m = LaunchConfiguration("follow_distance_m")
     approach_distance_m = LaunchConfiguration("approach_distance_m")
+    enable_obstacle_avoidance = LaunchConfiguration("enable_obstacle_avoidance")
+    range_topic = LaunchConfiguration("range_topic")
+    obstacle_stop_distance_m = LaunchConfiguration("obstacle_stop_distance_m")
+    obstacle_slow_distance_m = LaunchConfiguration("obstacle_slow_distance_m")
+    enable_arm_gripper = LaunchConfiguration("enable_arm_gripper")
+    pick_x_m = LaunchConfiguration("pick_x_m")
+    pick_z_m = LaunchConfiguration("pick_z_m")
+    carry_x_m = LaunchConfiguration("carry_x_m")
+    carry_z_m = LaunchConfiguration("carry_z_m")
+    drop_x_m = LaunchConfiguration("drop_x_m")
+    drop_z_m = LaunchConfiguration("drop_z_m")
+    gripper_power = LaunchConfiguration("gripper_power")
 
     perception_launch = PathJoinSubstitution(
         [
@@ -86,6 +99,72 @@ def generate_launch_description():
                 default_value="0.8",
                 description="Target distance for CMD_APPROACH.",
             ),
+            DeclareLaunchArgument(
+                "enable_obstacle_avoidance",
+                default_value="true",
+                description=(
+                    "Use the front ToF range topic to slow or stop follow motion."
+                ),
+            ),
+            DeclareLaunchArgument(
+                "range_topic",
+                default_value="/range_0",
+                description="Front ToF sensor_msgs/Range topic from robomaster_ros.",
+            ),
+            DeclareLaunchArgument(
+                "obstacle_stop_distance_m",
+                default_value="0.45",
+                description=(
+                    "Stop forward motion when front ToF is at or below this distance."
+                ),
+            ),
+            DeclareLaunchArgument(
+                "obstacle_slow_distance_m",
+                default_value="0.9",
+                description=(
+                    "Begin scaling down forward speed below this front ToF distance."
+                ),
+            ),
+            DeclareLaunchArgument(
+                "enable_arm_gripper",
+                default_value="true",
+                description="Start the approach-gated arm/gripper pick-drop node.",
+            ),
+            DeclareLaunchArgument(
+                "pick_x_m",
+                default_value="0.16",
+                description="Arm x target for ground pickup, in meters.",
+            ),
+            DeclareLaunchArgument(
+                "pick_z_m",
+                default_value="-0.08",
+                description="Arm z target for ground pickup, in meters.",
+            ),
+            DeclareLaunchArgument(
+                "carry_x_m",
+                default_value="0.10",
+                description="Arm x target after pickup/drop, in meters.",
+            ),
+            DeclareLaunchArgument(
+                "carry_z_m",
+                default_value="0.10",
+                description="Arm z target after pickup/drop, in meters.",
+            ),
+            DeclareLaunchArgument(
+                "drop_x_m",
+                default_value="0.16",
+                description="Arm x target for ground drop, in meters.",
+            ),
+            DeclareLaunchArgument(
+                "drop_z_m",
+                default_value="-0.08",
+                description="Arm z target for ground drop, in meters.",
+            ),
+            DeclareLaunchArgument(
+                "gripper_power",
+                default_value="0.7",
+                description="Gripper open/close power in [0, 1].",
+            ),
             Node(
                 package="cs603_voice_intent",
                 executable="voice_intent_node",
@@ -103,6 +182,27 @@ def generate_launch_description():
                 executable="behavior_fsm",
                 name="behavior_fsm",
                 output="screen",
+            ),
+            Node(
+                package="cs603_voice_intent",
+                executable="arm_gripper_node",
+                name="arm_gripper_node",
+                output="screen",
+                condition=IfCondition(enable_arm_gripper),
+                parameters=[
+                    {
+                        "pick_x_m": ParameterValue(pick_x_m, value_type=float),
+                        "pick_z_m": ParameterValue(pick_z_m, value_type=float),
+                        "carry_x_m": ParameterValue(carry_x_m, value_type=float),
+                        "carry_z_m": ParameterValue(carry_z_m, value_type=float),
+                        "drop_x_m": ParameterValue(drop_x_m, value_type=float),
+                        "drop_z_m": ParameterValue(drop_z_m, value_type=float),
+                        "gripper_power": ParameterValue(
+                            gripper_power,
+                            value_type=float,
+                        ),
+                    }
+                ],
             ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(perception_launch),
@@ -127,6 +227,10 @@ def generate_launch_description():
                     "follow_distance_m": follow_distance_m,
                     "approach_distance_m": approach_distance_m,
                     "require_fsm_active": "true",
+                    "enable_obstacle_avoidance": enable_obstacle_avoidance,
+                    "range_topic": range_topic,
+                    "obstacle_stop_distance_m": obstacle_stop_distance_m,
+                    "obstacle_slow_distance_m": obstacle_slow_distance_m,
                 }.items(),
             ),
         ]

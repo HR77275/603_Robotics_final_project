@@ -18,7 +18,9 @@ from cs603_voice_intent.behavior_fsm import (
 )
 from cs603_voice_intent.intent_classifier import (
     CMD_APPROACH,
+    CMD_DROP,
     CMD_FOLLOW,
+    CMD_PICK,
     CMD_STOP,
     CMD_UNKNOWN,
 )
@@ -37,6 +39,10 @@ class TestIntentToStateMapping:
 
     def test_unknown_not_in_map(self) -> None:
         assert CMD_UNKNOWN not in INTENT_TO_STATE
+
+    def test_manipulation_intents_do_not_change_fsm_state(self) -> None:
+        assert CMD_PICK not in INTENT_TO_STATE
+        assert CMD_DROP not in INTENT_TO_STATE
 
 
 @pytest.mark.unit

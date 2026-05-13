@@ -40,6 +40,8 @@ Type one phrase per line:
 follow me
 stop
 come here
+pick up the object
+drop it
 ```
 
 Expected messages:
@@ -48,6 +50,8 @@ Expected messages:
 CMD_FOLLOW
 CMD_STOP
 CMD_APPROACH
+CMD_PICK
+CMD_DROP
 ```
 
 `stdin` mode is meant for `ros2 run`. Do not use the launch terminal as a
@@ -67,6 +71,8 @@ To send more phrases while the launch is still running:
 ```bash
 ros2 param set /voice_intent_node stub_text "stop"
 ros2 param set /voice_intent_node stub_text "come here"
+ros2 param set /voice_intent_node stub_text "pick up the object"
+ros2 param set /voice_intent_node stub_text "drop it"
 ```
 
 ## Robot Motion Demo
@@ -98,6 +104,10 @@ gate the PID follow controller:
 /voice_intent -> /behavior_state + /follow_target_active -> follow_node -> /cmd_vel
 ```
 
+The integration launch also starts `arm_gripper_node` by default. It observes
+`/voice_intent` and `/behavior_state`, ignores `CMD_PICK`/`CMD_DROP` outside
+`APPROACHING`, and publishes progress on `/arm_gripper_status`.
+
 Bench test with fake perception and no physical motion:
 
 ```bash
@@ -121,6 +131,8 @@ Send more voice intents while launch is running:
 
 ```bash
 ros2 param set /voice_intent_node stub_text "come here"
+ros2 param set /voice_intent_node stub_text "pick up the object"
+ros2 param set /voice_intent_node stub_text "drop it"
 ros2 param set /voice_intent_node stub_text "stop"
 ```
 
@@ -142,6 +154,11 @@ ros2 launch cs603_voice_intent integration_demo.launch.py \
   use_depth:=true \
   enable_motion:=true
 ```
+
+For pick/drop on the EP Core, make sure `robomaster_ros` was launched with
+`arm:=true` and `gripper:=true`. The default manipulation poses are conservative
+starting points; tune `pick_x_m`, `pick_z_m`, `drop_x_m`, `drop_z_m`,
+`carry_x_m`, and `carry_z_m` with the robot on blocks before a floor pickup.
 
 ## Whisper Setup On WSL
 

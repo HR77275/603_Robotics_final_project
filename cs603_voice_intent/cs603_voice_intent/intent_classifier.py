@@ -1,7 +1,9 @@
 import re
 
 CMD_APPROACH = "CMD_APPROACH"
+CMD_DROP = "CMD_DROP"
 CMD_FOLLOW = "CMD_FOLLOW"
+CMD_PICK = "CMD_PICK"
 CMD_STOP = "CMD_STOP"
 CMD_UNKNOWN = "CMD_UNKNOWN"
 
@@ -19,6 +21,27 @@ _COMMAND_PATTERNS = (
             r"\bemergency\b",
             r"\bcancel\b",
             r"\bred light\b",
+        ),
+    ),
+    (
+        CMD_PICK,
+        (
+            r"\bpick\b",
+            r"\bpick up\b",
+            r"\bgrab\b",
+            r"\bgrasp\b",
+            r"\btake it\b",
+            r"\bcollect\b",
+        ),
+    ),
+    (
+        CMD_DROP,
+        (
+            r"\bdrop\b",
+            r"\bput down\b",
+            r"\brelease\b",
+            r"\blet go\b",
+            r"\bplace it down\b",
         ),
     ),
     (

@@ -103,9 +103,13 @@ Type phrases such as:
 follow me
 stop
 come here
+pick up the object
+drop it
 ```
 
-Expected intents are `CMD_FOLLOW`, `CMD_STOP`, and `CMD_APPROACH`.
+Expected intents are `CMD_FOLLOW`, `CMD_STOP`, `CMD_APPROACH`, `CMD_PICK`, and
+`CMD_DROP`. The arm/gripper node acts on pick/drop only while
+`/behavior_state` is `APPROACHING`.
 
 For `ros2 launch`, use parameter mode instead of typing into the launch
 terminal:
@@ -146,7 +150,8 @@ CS603_ROS_SETUP="$ROBOMASTER_WS/install/setup.bash" python3 tools/voice_web_demo
 ### Run Physical Robot Demo
 
 Only enable motion after the RoboMaster driver is connected, the robot has room
-to move, and the emergency stop command is ready.
+to move, and the emergency stop command is ready. For obstacle avoidance, start
+`robomaster_ros` with the front ToF sensor enabled so `/range_0` is publishing.
 
 Bench-test the full voice/FSM/follow-controller path with fake perception and
 motion disabled:
@@ -170,7 +175,9 @@ ros2 launch cs603_voice_intent integration_demo.launch.py \
 ```
 
 Enable physical follow motion only after `/behavior_state`,
-`/follow_target_active`, and perception topics look correct:
+`/follow_target_active`, `/range_0`, and perception topics look correct. For
+pick/drop behavior, also launch `robomaster_ros` with `arm:=true` and
+`gripper:=true` and watch `/arm_gripper_status`:
 
 ```bash
 ros2 launch cs603_voice_intent integration_demo.launch.py \
@@ -184,6 +191,15 @@ Emergency stop:
 ```bash
 ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{}" --once
 ```
+
+Obstacle avoidance is enabled by default in the follow controller. It slows
+forward motion below `obstacle_slow_distance_m` and stops forward motion at
+`obstacle_stop_distance_m` using the front ToF range topic.
+
+The arm/gripper pick-drop node is enabled by default in the integration launch.
+It listens for `CMD_PICK` and `CMD_DROP`, but ignores them unless the behavior
+FSM is already in `APPROACHING`. Tune the ground and carry poses with
+`pick_x_m`, `pick_z_m`, `drop_x_m`, `drop_z_m`, `carry_x_m`, and `carry_z_m`.
 
 More detailed voice notes live in
 [`docs/VOICE_INTENT_RUNBOOK.md`](docs/VOICE_INTENT_RUNBOOK.md).
@@ -368,6 +384,8 @@ ros2 launch robomaster_ros main.launch \
   conn_type:=sta \
   serial_number:=<ROBOT_SERIAL_NUMBER> \
   chassis_timeout:=0.5 \
+  tof_0:=true \
+  tof_rate:=10 \
   arm:=true \
   gripper:=true
 ```
