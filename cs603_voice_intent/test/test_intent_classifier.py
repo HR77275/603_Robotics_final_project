@@ -2,8 +2,10 @@ import unittest
 
 from cs603_voice_intent.intent_classifier import (
     CMD_APPROACH,
+    CMD_DROP,
     CMD_FOLLOW,
     CMD_FOLLOW_AUTHORIZED,
+    CMD_PICK,
     CMD_STOP,
     CMD_UNKNOWN,
     classify_intent,
@@ -21,6 +23,16 @@ class IntentClassifierTest(unittest.TestCase):
         self.assertEqual(classify_intent("come here"), CMD_APPROACH)
         self.assertEqual(classify_intent("come over"), CMD_APPROACH)
         self.assertEqual(classify_intent("move closer please"), CMD_APPROACH)
+
+    def test_pick_synonyms(self):
+        self.assertEqual(classify_intent("pick up the object"), CMD_PICK)
+        self.assertEqual(classify_intent("grab it"), CMD_PICK)
+        self.assertEqual(classify_intent("grasp the item"), CMD_PICK)
+
+    def test_drop_synonyms(self):
+        self.assertEqual(classify_intent("drop it"), CMD_DROP)
+        self.assertEqual(classify_intent("put down the item"), CMD_DROP)
+        self.assertEqual(classify_intent("release"), CMD_DROP)
 
     def test_follow_synonyms(self):
         self.assertEqual(classify_intent("follow me"), CMD_FOLLOW)

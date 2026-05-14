@@ -4,6 +4,7 @@ from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -18,6 +19,19 @@ def generate_launch_description():
     target_track_id = LaunchConfiguration("target_track_id")
     follow_distance_m = LaunchConfiguration("follow_distance_m")
     approach_distance_m = LaunchConfiguration("approach_distance_m")
+    enable_arm_gripper = LaunchConfiguration("enable_arm_gripper")
+    pick_x_m = LaunchConfiguration("pick_x_m")
+    pick_z_m = LaunchConfiguration("pick_z_m")
+    carry_x_m = LaunchConfiguration("carry_x_m")
+    carry_z_m = LaunchConfiguration("carry_z_m")
+    drop_x_m = LaunchConfiguration("drop_x_m")
+    drop_z_m = LaunchConfiguration("drop_z_m")
+    gripper_power = LaunchConfiguration("gripper_power")
+    arm_control_mode = LaunchConfiguration("arm_control_mode")
+    arm_topic_step_delay_sec = LaunchConfiguration("arm_topic_step_delay_sec")
+    continue_after_gripper_close_failure = LaunchConfiguration(
+        "continue_after_gripper_close_failure"
+    )
 
     perception_launch = PathJoinSubstitution(
         [
@@ -91,6 +105,61 @@ def generate_launch_description():
                 default_value="0.8",
                 description="Target distance for CMD_APPROACH.",
             ),
+            DeclareLaunchArgument(
+                "enable_arm_gripper",
+                default_value="true",
+                description="Start the approach-gated arm/gripper pick-drop node.",
+            ),
+            DeclareLaunchArgument(
+                "pick_x_m",
+                default_value="0.16",
+                description="Arm x target for ground pickup, in meters.",
+            ),
+            DeclareLaunchArgument(
+                "pick_z_m",
+                default_value="-0.08",
+                description="Arm z target for ground pickup, in meters.",
+            ),
+            DeclareLaunchArgument(
+                "carry_x_m",
+                default_value="0.10",
+                description="Arm x target after pickup/drop, in meters.",
+            ),
+            DeclareLaunchArgument(
+                "carry_z_m",
+                default_value="0.10",
+                description="Arm z target after pickup/drop, in meters.",
+            ),
+            DeclareLaunchArgument(
+                "drop_x_m",
+                default_value="0.16",
+                description="Arm x target for ground drop, in meters.",
+            ),
+            DeclareLaunchArgument(
+                "drop_z_m",
+                default_value="-0.08",
+                description="Arm z target for ground drop, in meters.",
+            ),
+            DeclareLaunchArgument(
+                "gripper_power",
+                default_value="0.7",
+                description="Gripper open/close power in [0, 1].",
+            ),
+            DeclareLaunchArgument(
+                "arm_control_mode",
+                default_value="topic",
+                description="Use move_arm action or target_arm_position topic.",
+            ),
+            DeclareLaunchArgument(
+                "arm_topic_step_delay_sec",
+                default_value="1.0",
+                description="Delay after each topic-based arm position command.",
+            ),
+            DeclareLaunchArgument(
+                "continue_after_gripper_close_failure",
+                default_value="true",
+                description="Lift after a pickup close action reports object-contact failure.",
+            ),
             Node(
                 package="cs603_voice_intent",
                 executable="voice_intent_node",
@@ -108,6 +177,36 @@ def generate_launch_description():
                 executable="behavior_fsm",
                 name="behavior_fsm",
                 output="screen",
+            ),
+            Node(
+                package="cs603_voice_intent",
+                executable="arm_gripper_node",
+                name="arm_gripper_node",
+                output="screen",
+                condition=IfCondition(enable_arm_gripper),
+                parameters=[
+                    {
+                        "pick_x_m": ParameterValue(pick_x_m, value_type=float),
+                        "pick_z_m": ParameterValue(pick_z_m, value_type=float),
+                        "carry_x_m": ParameterValue(carry_x_m, value_type=float),
+                        "carry_z_m": ParameterValue(carry_z_m, value_type=float),
+                        "drop_x_m": ParameterValue(drop_x_m, value_type=float),
+                        "drop_z_m": ParameterValue(drop_z_m, value_type=float),
+                        "gripper_power": ParameterValue(
+                            gripper_power,
+                            value_type=float,
+                        ),
+                        "arm_control_mode": arm_control_mode,
+                        "arm_topic_step_delay_sec": ParameterValue(
+                            arm_topic_step_delay_sec,
+                            value_type=float,
+                        ),
+                        "continue_after_gripper_close_failure": ParameterValue(
+                            continue_after_gripper_close_failure,
+                            value_type=bool,
+                        ),
+                    }
+                ],
             ),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(perception_launch),
