@@ -108,7 +108,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "enable_arm_gripper",
                 default_value="true",
-                description="Start the approach-gated arm/gripper pick-drop node.",
+                description="Start the arm/gripper pick-drop node.",
             ),
             DeclareLaunchArgument(
                 "pick_x_m",

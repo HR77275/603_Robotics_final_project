@@ -8,13 +8,19 @@ from cs603_voice_intent.arm_gripper_sequence import (
     should_accept_manipulation,
     should_continue_after_step_failure,
 )
-from cs603_voice_intent.behavior_fsm import STATE_APPROACHING, STATE_FOLLOWING
+from cs603_voice_intent.behavior_fsm import (
+    STATE_APPROACHING,
+    STATE_FOLLOWING,
+    STATE_STOPPED,
+)
 from cs603_voice_intent.intent_classifier import CMD_DROP, CMD_PICK, CMD_STOP
 
 
-def test_pick_and_drop_are_only_accepted_in_approach_mode():
+def test_pick_and_drop_are_accepted_in_approach_or_stop_mode():
     assert should_accept_manipulation(CMD_PICK, STATE_APPROACHING)
     assert should_accept_manipulation(CMD_DROP, STATE_APPROACHING)
+    assert should_accept_manipulation(CMD_PICK, STATE_STOPPED)
+    assert should_accept_manipulation(CMD_DROP, STATE_STOPPED)
     assert not should_accept_manipulation(CMD_PICK, STATE_FOLLOWING)
     assert not should_accept_manipulation(CMD_STOP, STATE_APPROACHING)
 

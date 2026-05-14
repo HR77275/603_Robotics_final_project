@@ -29,7 +29,7 @@ from robomaster_msgs.action import GripperControl, MoveArm
 
 
 class ArmGripperNode(Node):
-    """Runs pick/drop arm sequences only while the behavior FSM is APPROACHING."""
+    """Runs pick/drop arm sequences while the behavior FSM is APPROACHING or STOPPED."""
 
     def __init__(self) -> None:
         super().__init__("arm_gripper_node")

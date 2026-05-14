@@ -25,6 +25,7 @@ setup(
         'console_scripts': [
             'follow_node = robomaster_follow_controller.follow_node:main',
             'fake_perception = robomaster_follow_controller.fake_perception:main',
+            'follow_distance_eval = robomaster_follow_controller.follow_distance_eval_node:main',
         ],
     },
 )

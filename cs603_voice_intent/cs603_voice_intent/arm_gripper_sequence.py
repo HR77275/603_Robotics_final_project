@@ -13,6 +13,8 @@ GRIPPER_OPEN = "open"
 GRIPPER_CLOSE = "close"
 
 STATE_APPROACHING = "APPROACHING"
+STATE_STOPPED = "STOPPED"
+MANIPULATION_ALLOWED_STATES = (STATE_APPROACHING, STATE_STOPPED)
 
 
 @dataclass(frozen=True)
@@ -44,7 +46,10 @@ def is_manipulation_intent(intent: str) -> bool:
 
 
 def should_accept_manipulation(intent: str, behavior_state: str) -> bool:
-    return is_manipulation_intent(intent) and behavior_state == STATE_APPROACHING
+    return (
+        is_manipulation_intent(intent)
+        and behavior_state in MANIPULATION_ALLOWED_STATES
+    )
 
 
 def build_manipulation_sequence(
