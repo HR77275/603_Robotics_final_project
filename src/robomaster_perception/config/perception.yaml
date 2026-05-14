@@ -3,7 +3,7 @@ deepsort_tracker_node:
     image_topic: /camera/image_color
     vision_topic: /vision
     output_topic: /people/tracks
-    embedder: torchreid
+    embedder: mobilenet
     embedder_gpu: true
     max_age: 45
     n_init: 3

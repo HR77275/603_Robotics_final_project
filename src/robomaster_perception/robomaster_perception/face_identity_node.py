@@ -66,12 +66,40 @@ class FaceIdentityNode(Node):
             f"Face identity node started with {len(self.names)} identity/identities"
         )
 
-    def load_db(self, path):
+    def resolve_db_path(self, path):
         db_path = Path(path).expanduser()
-        if not db_path.exists():
+        if db_path.is_absolute():
+            return db_path if db_path.exists() else None
+
+        raw = Path(path)
+        candidates = [Path.cwd() / raw]
+        candidates.extend(parent / raw for parent in Path.cwd().resolve().parents)
+
+        source_path = Path(__file__).resolve()
+        candidates.extend(parent / raw for parent in source_path.parents)
+        for parent in source_path.parents:
+            src_dir = parent / "src"
+            if src_dir.exists():
+                candidates.extend(src_dir.glob(f"*/{raw.as_posix()}"))
+
+        seen = set()
+        for candidate in candidates:
+            candidate = candidate.resolve()
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            if candidate.exists():
+                return candidate
+
+        return None
+
+    def load_db(self, path):
+        db_path = self.resolve_db_path(path)
+        if db_path is None:
             raise FileNotFoundError(
-                f"Face DB not found: {db_path}. Run `ros2 run robomaster_perception enroll_faces` first."
+                f"Face DB not found: {path}. Run `ros2 run robomaster_perception enroll_faces` first."
             )
+        self.get_logger().info(f"Using face DB: {db_path}")
         data = np.load(db_path, allow_pickle=False)
         names = [str(name) for name in data["names"]]
         embeddings = np.asarray(data["embeddings"], dtype=np.float32)

@@ -152,21 +152,55 @@
       font-weight: 700;
     }
 
-    .quick {
+    .commands {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .command-group {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .command-heading {
       display: flex;
-      flex-wrap: wrap;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      font-weight: 800;
+    }
+
+    .command-heading small {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    .quick {
+      display: grid;
+      grid-template-columns: 1fr;
       gap: 8px;
     }
 
     .quick button {
-      height: 36px;
+      min-height: 40px;
       border: 1px solid var(--line);
-      border-radius: 999px;
+      border-radius: 6px;
       background: #fff;
-      padding: 0 12px;
+      padding: 8px 10px;
       cursor: pointer;
       color: var(--ink);
       font-weight: 600;
+      text-align: left;
+    }
+
+    .quick button.primary {
+      border-color: rgba(29, 95, 209, 0.45);
+      color: var(--blue);
     }
 
     details {
@@ -203,7 +237,7 @@
     @media (max-width: 640px) {
       body { padding: 12px; }
       main { padding: 16px; }
-      header, .result, .manual { display: grid; grid-template-columns: 1fr; }
+      header, .result, .manual, .commands { display: grid; grid-template-columns: 1fr; }
       .status { min-width: 0; }
     }
   </style>
@@ -234,11 +268,46 @@
         <button class="secondary" id="sendTextBtn" type="button">Send Text</button>
       </div>
 
-      <div class="quick" aria-label="Quick commands">
-        <button type="button" data-phrase="follow me">follow me</button>
-        <button type="button" data-phrase="come here">come here</button>
-        <button type="button" data-phrase="stop">stop</button>
-        <button type="button" data-phrase="red light">red light</button>
+      <div class="commands" aria-label="Command buttons">
+        <div class="command-group">
+          <div class="command-heading">
+            <span>Stop</span>
+            <small>CMD_STOP</small>
+          </div>
+          <div class="quick">
+            <button class="primary" type="button" data-phrase="stop">stop</button>
+          </div>
+        </div>
+
+        <div class="command-group">
+          <div class="command-heading">
+            <span>Follow</span>
+            <small>CMD_FOLLOW</small>
+          </div>
+          <div class="quick">
+            <button class="primary" type="button" data-phrase="follow me">follow me</button>
+          </div>
+        </div>
+
+        <div class="command-group">
+          <div class="command-heading">
+            <span>Follow Authorized</span>
+            <small>CMD_FOLLOW_AUTHORIZED</small>
+          </div>
+          <div class="quick">
+            <button class="primary" type="button" data-phrase="follow authorized">follow authorized</button>
+          </div>
+        </div>
+
+        <div class="command-group">
+          <div class="command-heading">
+            <span>Approach</span>
+            <small>CMD_APPROACH</small>
+          </div>
+          <div class="quick">
+            <button class="primary" type="button" data-phrase="come here">come here</button>
+          </div>
+        </div>
       </div>
 
       <details>

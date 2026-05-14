@@ -61,6 +61,7 @@ private/
 scratch/
 
 # Local/private face database material
+face_db.zip
 face_db/images/*
 face_db/embeddings/*
 !face_db/images/.gitkeep
