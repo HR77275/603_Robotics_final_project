@@ -7,7 +7,11 @@ from rclpy.parameter import Parameter
 from sensor_msgs.msg import Image
 from std_msgs.msg import Bool, String
 
-from robomaster_perception_msgs.msg import PeopleDepth, PeopleIdentities
+from robomaster_perception_msgs.msg import (
+    PeopleDepth,
+    PeopleIdentities,
+    TrackedPeople,
+)
 
 
 STATE_FOLLOWING = 'FOLLOWING'
@@ -66,6 +70,7 @@ class FollowNode(Node):
 
         self.declare_parameter('debug_image_topic', '/perception/tracking_debug_image')
         self.declare_parameter('people_depth_topic', '/people/depth')
+        self.declare_parameter('people_tracks_topic', '/people/tracks')
         self.declare_parameter('people_identities_topic', '/people/identities')
         self.declare_parameter('cmd_vel_topic', '/cmd_vel')
         self.declare_parameter('follow_active_topic', '/follow_target_active')
@@ -76,6 +81,7 @@ class FollowNode(Node):
         self.declare_parameter('approach_distance_m', 0.8)
         self.declare_parameter('control_rate_hz', 20.0)
         self.declare_parameter('stale_timeout_sec', 0.75)
+        self.declare_parameter('track_stale_timeout_sec', 0.35)
         self.declare_parameter('linear_kp', 0.45)
         self.declare_parameter('linear_ki', 0.0)
         self.declare_parameter('linear_kd', 0.12)
@@ -101,7 +107,9 @@ class FollowNode(Node):
         self.image_width = None
         self.image_height = None
         self.authorized_only = False
+        self.latest_track_by_id = {}
         self.latest_identity_by_id = {}
+        self.last_track_time = None
         self.last_identity_time = None
         self.last_target_time = None
         self.last_control_time = self.get_clock().now()
@@ -141,6 +149,12 @@ class FollowNode(Node):
             10,
         )
         self.create_subscription(
+            TrackedPeople,
+            self.get_parameter('people_tracks_topic').value,
+            self.people_tracks_cb,
+            10,
+        )
+        self.create_subscription(
             PeopleIdentities,
             self.get_parameter('people_identities_topic').value,
             self.people_identities_cb,
@@ -166,6 +180,7 @@ class FollowNode(Node):
             'Follow node started: subscribing to '
             f"{self.get_parameter('debug_image_topic').value} and "
             f"{self.get_parameter('people_depth_topic').value}; "
+            f"tracks={self.get_parameter('people_tracks_topic').value}; "
             f"identities={self.get_parameter('people_identities_topic').value}; "
             f"FSM active required={self.get_parameter('require_fsm_active').value}"
         )
@@ -173,6 +188,12 @@ class FollowNode(Node):
     def image_cb(self, msg):
         self.image_width = int(msg.width)
         self.image_height = int(msg.height)
+
+    def people_tracks_cb(self, msg):
+        self.latest_track_by_id = {
+            int(track.track_id): track for track in msg.tracks
+        }
+        self.last_track_time = self.get_clock().now()
 
     def people_identities_cb(self, msg):
         self.latest_identity_by_id = {
@@ -207,6 +228,27 @@ class FollowNode(Node):
             self.latest_identity_by_id.get(int(track_id)),
             self.get_parameter('authorized_identity_statuses').value,
         )
+
+    def track_data_is_fresh(self, now):
+        if self.last_track_time is None:
+            return False
+
+        age = (now - self.last_track_time).nanoseconds * 1e-9
+        stale_timeout = float(
+            self.get_parameter('track_stale_timeout_sec').value
+        )
+        return age <= stale_timeout
+
+    def target_roi(self, now):
+        if self.target is None:
+            return None
+
+        if self.track_data_is_fresh(now):
+            track = self.latest_track_by_id.get(int(self.target.track_id))
+            if track is not None:
+                return track.roi
+
+        return self.target.roi
 
     def people_depth_cb(self, msg):
         valid_people = [
@@ -298,7 +340,12 @@ class FollowNode(Node):
             return
 
         depth_error = self.target.depth_m - float(self.get_parameter('target_distance_m').value)
-        center_error = self.target.roi.x_offset - 0.5
+        target_roi = self.target_roi(now)
+        if target_roi is None:
+            self.publish_stop()
+            return
+
+        center_error = target_roi.x_offset - 0.5
 
         if abs(depth_error) < float(self.get_parameter('deadband_distance_m').value):
             depth_error = 0.0

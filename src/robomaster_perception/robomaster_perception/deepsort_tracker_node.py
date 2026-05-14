@@ -122,7 +122,8 @@ class DeepSortTrackerNode(Node):
 
             item = TrackedPerson()
             item.track_id = self.track_id_as_int(track.track_id)
-            item.roi = self.ltrb_pixels_to_roi(track.to_ltrb(), image_width, image_height)
+            ltrb = track.to_ltrb(orig=True, orig_strict=False)
+            item.roi = self.ltrb_pixels_to_roi(ltrb, image_width, image_height)
             item.confidence = 1.0
             item.state = "confirmed" if track.is_confirmed() else "tentative"
             item.age = int(getattr(track, "age", 0))

@@ -5,8 +5,8 @@ deepsort_tracker_node:
     output_topic: /people/tracks
     embedder: mobilenet
     embedder_gpu: true
-    max_age: 45
-    n_init: 3
+    max_age: 15
+    n_init: 2
     max_iou_distance: 0.9
     max_cosine_distance: 0.5
 
@@ -18,7 +18,7 @@ depth_estimator_node:
     depth_viz_topic: /depth/image_viz
     people_depth_topic: /people/depth
     tof_topic: /range_0
-    rate_hz: 2.0
+    rate_hz: 4.0
     device: cuda
     model_name: depth-anything/Depth-Anything-V2-Metric-Indoor-Small-hf
 
