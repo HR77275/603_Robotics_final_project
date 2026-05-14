@@ -21,6 +21,15 @@ depth_estimator_node:
     rate_hz: 4.0
     device: cuda
     model_name: depth-anything/Depth-Anything-V2-Metric-Indoor-Small-hf
+    tof_stale_timeout_sec: 0.5
+    tof_requires_centered_track: true
+    tof_min_track_overlap_fraction: 0.25
+    tof_max_scale_jump_ratio: 1.8
+    default_depth_scale: 0.33
+    min_scale: 0.2
+    max_scale: 2.0
+    depth_filter_alpha: 0.4
+    depth_max_step_m: 0.25
 
 face_identity_node:
   ros__parameters:

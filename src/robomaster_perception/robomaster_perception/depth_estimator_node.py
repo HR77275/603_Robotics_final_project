@@ -32,13 +32,23 @@ class DepthEstimatorNode(Node):
         self.declare_parameter("roi_center_fraction", 0.6)
         self.declare_parameter("tof_center_fraction", 0.12)
         self.declare_parameter("tof_scale_alpha", 0.2)
+        self.declare_parameter("tof_stale_timeout_sec", 0.5)
+        self.declare_parameter("tof_requires_centered_track", True)
+        self.declare_parameter("tof_min_track_overlap_fraction", 0.25)
+        self.declare_parameter("tof_max_scale_jump_ratio", 1.8)
+        self.declare_parameter("default_depth_scale", 1.0)
         self.declare_parameter("min_scale", 0.2)
-        self.declare_parameter("max_scale", 5.0)
+        self.declare_parameter("max_scale", 2.0)
+        self.declare_parameter("depth_filter_alpha", 0.4)
+        self.declare_parameter("depth_max_step_m", 0.35)
 
         self.bridge = CvBridge()
         self.latest_tracks = None
         self.latest_tof = None
+        self.last_tof_time = None
         self.filtered_scale = None
+        self.scale_locked = False
+        self.filtered_depth_by_id = {}
         self.last_inference_time = 0.0
 
         self.image_topic = self.get_parameter("image_topic").value
@@ -48,9 +58,25 @@ class DepthEstimatorNode(Node):
         self.roi_center_fraction = float(self.get_parameter("roi_center_fraction").value)
         self.tof_center_fraction = float(self.get_parameter("tof_center_fraction").value)
         self.tof_scale_alpha = float(self.get_parameter("tof_scale_alpha").value)
+        self.tof_stale_timeout_sec = float(
+            self.get_parameter("tof_stale_timeout_sec").value
+        )
+        self.tof_requires_centered_track = bool(
+            self.get_parameter("tof_requires_centered_track").value
+        )
+        self.tof_min_track_overlap_fraction = float(
+            self.get_parameter("tof_min_track_overlap_fraction").value
+        )
+        self.tof_max_scale_jump_ratio = float(
+            self.get_parameter("tof_max_scale_jump_ratio").value
+        )
+        self.default_depth_scale = float(self.get_parameter("default_depth_scale").value)
         self.min_scale = float(self.get_parameter("min_scale").value)
         self.max_scale = float(self.get_parameter("max_scale").value)
+        self.depth_filter_alpha = float(self.get_parameter("depth_filter_alpha").value)
+        self.depth_max_step_m = float(self.get_parameter("depth_max_step_m").value)
         self.method = str(self.get_parameter("model_name").value)
+        self.filtered_scale = self.default_depth_scale
 
         requested_device = str(self.get_parameter("device").value)
         if requested_device == "cuda" and not torch.cuda.is_available():
@@ -85,6 +111,7 @@ class DepthEstimatorNode(Node):
     def tof_cb(self, msg):
         if msg.min_range <= msg.range <= msg.max_range and np.isfinite(msg.range):
             self.latest_tof = float(msg.range)
+            self.last_tof_time = time.monotonic()
 
     def should_run(self):
         if self.rate_hz <= 0.0:
@@ -120,9 +147,59 @@ class DepthEstimatorNode(Node):
             return float("nan"), 0.0
         return float(np.median(valid)), float(valid.size / crop.size)
 
-    def update_tof_scale(self, depth_map):
+    def tof_is_fresh(self):
         if self.latest_tof is None:
-            return 1.0, float("nan"), False
+            return False
+        if self.last_tof_time is None:
+            return False
+        return time.monotonic() - self.last_tof_time <= self.tof_stale_timeout_sec
+
+    def fallback_scale(self):
+        if self.filtered_scale is not None and np.isfinite(self.filtered_scale):
+            return float(self.filtered_scale)
+        return float(self.default_depth_scale)
+
+    def track_tof_overlap_fraction(self, track):
+        frac = max(0.02, min(0.5, self.tof_center_fraction))
+        beam_left = 0.5 - frac / 2.0
+        beam_top = 0.5 - frac / 2.0
+        beam_right = 0.5 + frac / 2.0
+        beam_bottom = 0.5 + frac / 2.0
+
+        roi = track.roi
+        track_left = roi.x_offset - roi.width / 2.0
+        track_top = roi.y_offset - roi.height / 2.0
+        track_right = roi.x_offset + roi.width / 2.0
+        track_bottom = roi.y_offset + roi.height / 2.0
+
+        overlap_width = max(
+            0.0,
+            min(beam_right, track_right) - max(beam_left, track_left),
+        )
+        overlap_height = max(
+            0.0,
+            min(beam_bottom, track_bottom) - max(beam_top, track_top),
+        )
+        beam_area = max(frac * frac, 1e-6)
+        return (overlap_width * overlap_height) / beam_area
+
+    def has_centered_tof_track(self):
+        if not self.tof_requires_centered_track:
+            return True
+        if self.latest_tracks is None:
+            return False
+
+        min_overlap = max(0.0, min(1.0, self.tof_min_track_overlap_fraction))
+        return any(
+            self.track_tof_overlap_fraction(track) >= min_overlap
+            for track in self.latest_tracks.tracks
+        )
+
+    def update_tof_scale(self, depth_map):
+        if not self.tof_is_fresh():
+            return self.fallback_scale(), float("nan"), False
+        if not self.has_centered_tof_track():
+            return self.fallback_scale(), self.latest_tof, False
 
         h, w = depth_map.shape[:2]
         frac = max(0.02, min(0.5, self.tof_center_fraction))
@@ -137,10 +214,17 @@ class DepthEstimatorNode(Node):
 
         mono_center, conf = self.median_valid(depth_map[y1:y2, x1:x2])
         if conf <= 0.0 or not np.isfinite(mono_center) or mono_center <= 0.0:
-            return self.filtered_scale or 1.0, self.latest_tof, False
+            return self.fallback_scale(), self.latest_tof, False
 
         scale = self.latest_tof / mono_center
-        scale = max(self.min_scale, min(self.max_scale, scale))
+        if scale < self.min_scale or scale > self.max_scale:
+            return self.fallback_scale(), self.latest_tof, False
+
+        max_jump = max(1.0, self.tof_max_scale_jump_ratio)
+        if self.scale_locked and self.filtered_scale is not None:
+            jump = scale / max(self.filtered_scale, 1e-6)
+            if jump > max_jump or jump < 1.0 / max_jump:
+                return self.fallback_scale(), self.latest_tof, False
 
         if self.filtered_scale is None:
             self.filtered_scale = scale
@@ -148,7 +232,28 @@ class DepthEstimatorNode(Node):
             alpha = max(0.0, min(1.0, self.tof_scale_alpha))
             self.filtered_scale = (1.0 - alpha) * self.filtered_scale + alpha * scale
 
+        self.scale_locked = True
         return self.filtered_scale, self.latest_tof, True
+
+    def filter_track_depth(self, track_id, depth_m):
+        if not np.isfinite(depth_m) or depth_m <= 0.0:
+            return depth_m
+
+        previous = self.filtered_depth_by_id.get(int(track_id))
+        if previous is None or not np.isfinite(previous):
+            filtered = float(depth_m)
+        else:
+            alpha = max(0.0, min(1.0, self.depth_filter_alpha))
+            candidate = previous + alpha * (float(depth_m) - previous)
+            max_step = max(0.0, self.depth_max_step_m)
+            if max_step > 0.0:
+                delta = max(-max_step, min(max_step, candidate - previous))
+                filtered = previous + delta
+            else:
+                filtered = candidate
+
+        self.filtered_depth_by_id[int(track_id)] = filtered
+        return filtered
 
     def roi_to_bounds(self, roi, width, height):
         cx = roi.x_offset * width
@@ -199,21 +304,32 @@ class DepthEstimatorNode(Node):
         out.header = header
 
         if self.latest_tracks is not None:
+            active_track_ids = set()
             for track in self.latest_tracks.tracks:
+                active_track_ids.add(int(track.track_id))
                 raw_depth_m, confidence = self.estimate_track_depth(depth_map, track.roi)
                 corrected_depth_m = raw_depth_m * scale if np.isfinite(raw_depth_m) else raw_depth_m
+                filtered_depth_m = self.filter_track_depth(
+                    track.track_id,
+                    corrected_depth_m,
+                )
 
                 item = PersonDepth()
                 item.track_id = track.track_id
                 item.roi = track.roi
-                item.depth_m = float(corrected_depth_m)
+                item.depth_m = float(filtered_depth_m)
                 item.raw_depth_m = float(raw_depth_m)
                 item.tof_range_m = float(tof_range)
                 item.tof_scale = float(scale)
                 item.tof_used = bool(tof_used)
                 item.confidence = float(confidence)
-                item.method = self.method + ("+tof_scale" if tof_used else "+raw")
+                method_suffix = "+tof_scale" if tof_used else "+scale_hold"
+                item.method = self.method + method_suffix + "+filtered"
                 out.people.append(item)
+
+            for track_id in list(self.filtered_depth_by_id):
+                if track_id not in active_track_ids:
+                    self.filtered_depth_by_id.pop(track_id, None)
 
         self.people_depth_pub.publish(out)
 
