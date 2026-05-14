@@ -7,11 +7,29 @@ from rclpy.parameter import Parameter
 from sensor_msgs.msg import Image
 from std_msgs.msg import Bool, String
 
-from robomaster_perception_msgs.msg import PeopleDepth
+from robomaster_perception_msgs.msg import PeopleDepth, PeopleIdentities
 
 
 STATE_FOLLOWING = 'FOLLOWING'
+STATE_FOLLOWING_AUTHORIZED = 'FOLLOWING_AUTHORIZED'
 STATE_APPROACHING = 'APPROACHING'
+DEFAULT_AUTHORIZED_IDENTITY_STATUSES = ('recognized', 'cached')
+
+
+def is_authorized_identity(identity, authorized_statuses):
+    if identity is None:
+        return False
+
+    name = (identity.name or '').strip().lower()
+    if not name or name == 'unknown':
+        return False
+
+    allowed_statuses = {
+        str(status).strip().lower()
+        for status in authorized_statuses
+    }
+    status = (identity.status or '').strip().lower()
+    return status in allowed_statuses
 
 
 class PID:
@@ -48,6 +66,7 @@ class FollowNode(Node):
 
         self.declare_parameter('debug_image_topic', '/perception/tracking_debug_image')
         self.declare_parameter('people_depth_topic', '/people/depth')
+        self.declare_parameter('people_identities_topic', '/people/identities')
         self.declare_parameter('cmd_vel_topic', '/cmd_vel')
         self.declare_parameter('follow_active_topic', '/follow_target_active')
         self.declare_parameter('behavior_state_topic', '/behavior_state')
@@ -72,10 +91,18 @@ class FollowNode(Node):
         self.declare_parameter('angular_sign', -1.0)
         self.declare_parameter('enable_motion', True)
         self.declare_parameter('require_fsm_active', True)
+        self.declare_parameter(
+            'authorized_identity_statuses',
+            list(DEFAULT_AUTHORIZED_IDENTITY_STATUSES),
+        )
+        self.declare_parameter('identity_stale_timeout_sec', 2.5)
 
         self.target = None
         self.image_width = None
         self.image_height = None
+        self.authorized_only = False
+        self.latest_identity_by_id = {}
+        self.last_identity_time = None
         self.last_target_time = None
         self.last_control_time = self.get_clock().now()
         self.sent_stop = True
@@ -114,6 +141,12 @@ class FollowNode(Node):
             10,
         )
         self.create_subscription(
+            PeopleIdentities,
+            self.get_parameter('people_identities_topic').value,
+            self.people_identities_cb,
+            10,
+        )
+        self.create_subscription(
             Bool,
             self.get_parameter('follow_active_topic').value,
             self.follow_active_cb,
@@ -133,6 +166,7 @@ class FollowNode(Node):
             'Follow node started: subscribing to '
             f"{self.get_parameter('debug_image_topic').value} and "
             f"{self.get_parameter('people_depth_topic').value}; "
+            f"identities={self.get_parameter('people_identities_topic').value}; "
             f"FSM active required={self.get_parameter('require_fsm_active').value}"
         )
 
@@ -140,11 +174,52 @@ class FollowNode(Node):
         self.image_width = int(msg.width)
         self.image_height = int(msg.height)
 
+    def people_identities_cb(self, msg):
+        self.latest_identity_by_id = {
+            int(identity.track_id): identity for identity in msg.identities
+        }
+        now = self.get_clock().now()
+        self.last_identity_time = now
+        if (
+            self.authorized_only
+            and self.target is not None
+            and not self.is_authorized_track(self.target.track_id, now)
+        ):
+            self.target = None
+            self.last_target_time = None
+            self.publish_stop()
+
+    def identity_data_is_fresh(self, now):
+        if self.last_identity_time is None:
+            return False
+
+        age = (now - self.last_identity_time).nanoseconds * 1e-9
+        stale_timeout = float(
+            self.get_parameter('identity_stale_timeout_sec').value
+        )
+        return age <= stale_timeout
+
+    def is_authorized_track(self, track_id, now):
+        if not self.identity_data_is_fresh(now):
+            return False
+
+        return is_authorized_identity(
+            self.latest_identity_by_id.get(int(track_id)),
+            self.get_parameter('authorized_identity_statuses').value,
+        )
+
     def people_depth_cb(self, msg):
         valid_people = [
             person for person in msg.people
             if math.isfinite(person.depth_m) and person.depth_m > 0.0
         ]
+        if self.authorized_only:
+            now = self.get_clock().now()
+            valid_people = [
+                person for person in valid_people
+                if self.is_authorized_track(person.track_id, now)
+            ]
+
         if not valid_people:
             self.target = None
             return
@@ -167,8 +242,14 @@ class FollowNode(Node):
 
     def behavior_state_cb(self, msg):
         state = (msg.data or '').strip()
+        authorized_only = state == STATE_FOLLOWING_AUTHORIZED
+        if authorized_only != self.authorized_only:
+            self.target = None
+            self.last_target_time = None
+            self.publish_stop()
+        self.authorized_only = authorized_only
         self.behavior_state = state
-        if state == STATE_FOLLOWING:
+        if state in (STATE_FOLLOWING, STATE_FOLLOWING_AUTHORIZED):
             self.set_parameters([
                 Parameter(
                     'target_distance_m',

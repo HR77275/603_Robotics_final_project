@@ -2,6 +2,7 @@ import re
 
 CMD_APPROACH = "CMD_APPROACH"
 CMD_FOLLOW = "CMD_FOLLOW"
+CMD_FOLLOW_AUTHORIZED = "CMD_FOLLOW_AUTHORIZED"
 CMD_STOP = "CMD_STOP"
 CMD_UNKNOWN = "CMD_UNKNOWN"
 
@@ -31,6 +32,21 @@ _COMMAND_PATTERNS = (
             r"\bapproach\b",
             r"\bmove closer\b",
             r"\btowards me\b",
+        ),
+    ),
+    (
+        CMD_FOLLOW_AUTHORIZED,
+        (
+            r"\bfollow authorized\b",
+            r"\bfollow authorised\b",
+            r"\bfollow authorized person\b",
+            r"\bfollow authorised person\b",
+            r"\bfollow recognized\b",
+            r"\bfollow recognised\b",
+            r"\bfollow known\b",
+            r"\bfollow approved\b",
+            r"\bauthorized follow\b",
+            r"\bauthorised follow\b",
         ),
     ),
     (

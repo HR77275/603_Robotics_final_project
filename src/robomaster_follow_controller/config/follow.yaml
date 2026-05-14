@@ -2,6 +2,7 @@ follow_node:
   ros__parameters:
     debug_image_topic: /perception/tracking_debug_image
     people_depth_topic: /people/depth
+    people_identities_topic: /people/identities
     cmd_vel_topic: /cmd_vel
     follow_active_topic: /follow_target_active
     behavior_state_topic: /behavior_state
@@ -26,3 +27,7 @@ follow_node:
     angular_sign: -1.0
     enable_motion: true
     require_fsm_active: true
+    authorized_identity_statuses:
+      - recognized
+      - cached
+    identity_stale_timeout_sec: 2.5

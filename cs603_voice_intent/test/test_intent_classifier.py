@@ -3,6 +3,7 @@ import unittest
 from cs603_voice_intent.intent_classifier import (
     CMD_APPROACH,
     CMD_FOLLOW,
+    CMD_FOLLOW_AUTHORIZED,
     CMD_STOP,
     CMD_UNKNOWN,
     classify_intent,
@@ -25,6 +26,17 @@ class IntentClassifierTest(unittest.TestCase):
         self.assertEqual(classify_intent("follow me"), CMD_FOLLOW)
         self.assertEqual(classify_intent("come along"), CMD_FOLLOW)
         self.assertEqual(classify_intent("green light"), CMD_FOLLOW)
+
+    def test_authorized_follow_synonyms_win_before_generic_follow(self):
+        self.assertEqual(
+            classify_intent("follow authorized person"),
+            CMD_FOLLOW_AUTHORIZED,
+        )
+        self.assertEqual(
+            classify_intent("follow recognized person"),
+            CMD_FOLLOW_AUTHORIZED,
+        )
+        self.assertEqual(classify_intent("authorized follow"), CMD_FOLLOW_AUTHORIZED)
 
     def test_unknown(self):
         self.assertEqual(classify_intent("bring me coffee"), CMD_UNKNOWN)

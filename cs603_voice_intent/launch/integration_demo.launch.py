@@ -69,7 +69,10 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "use_identity",
                 default_value="false",
-                description="Enable face identity recognition in perception.",
+                description=(
+                    "Enable face identity recognition in perception; required "
+                    "for CMD_FOLLOW_AUTHORIZED."
+                ),
             ),
             DeclareLaunchArgument(
                 "target_track_id",
@@ -79,7 +82,9 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "follow_distance_m",
                 default_value="1.5",
-                description="Target distance for CMD_FOLLOW.",
+                description=(
+                    "Target distance for CMD_FOLLOW and CMD_FOLLOW_AUTHORIZED."
+                ),
             ),
             DeclareLaunchArgument(
                 "approach_distance_m",

@@ -12,6 +12,7 @@ from cs603_voice_intent.behavior_fsm import (
     INTENT_TO_STATE,
     STATE_APPROACHING,
     STATE_FOLLOWING,
+    STATE_FOLLOWING_AUTHORIZED,
     STATE_IDLE,
     STATE_STOPPED,
     Transition,
@@ -19,6 +20,7 @@ from cs603_voice_intent.behavior_fsm import (
 from cs603_voice_intent.intent_classifier import (
     CMD_APPROACH,
     CMD_FOLLOW,
+    CMD_FOLLOW_AUTHORIZED,
     CMD_STOP,
     CMD_UNKNOWN,
 )
@@ -28,6 +30,12 @@ from cs603_voice_intent.intent_classifier import (
 class TestIntentToStateMapping:
     def test_follow_maps_to_following(self) -> None:
         assert INTENT_TO_STATE[CMD_FOLLOW] == STATE_FOLLOWING
+
+    def test_authorized_follow_maps_to_authorized_following(self) -> None:
+        assert (
+            INTENT_TO_STATE[CMD_FOLLOW_AUTHORIZED]
+            == STATE_FOLLOWING_AUTHORIZED
+        )
 
     def test_stop_maps_to_stopped(self) -> None:
         assert INTENT_TO_STATE[CMD_STOP] == STATE_STOPPED
@@ -56,5 +64,11 @@ class TestTransitionDataclass:
 @pytest.mark.unit
 class TestStateConstants:
     def test_states_are_distinct(self) -> None:
-        states = {STATE_IDLE, STATE_FOLLOWING, STATE_STOPPED, STATE_APPROACHING}
-        assert len(states) == 4
+        states = {
+            STATE_IDLE,
+            STATE_FOLLOWING,
+            STATE_FOLLOWING_AUTHORIZED,
+            STATE_STOPPED,
+            STATE_APPROACHING,
+        }
+        assert len(states) == 5

@@ -1,9 +1,10 @@
 """Behavior FSM consuming /voice_intent and publishing /behavior_state.
 
-States: IDLE, FOLLOWING, STOPPED, APPROACHING.
+States: IDLE, FOLLOWING, FOLLOWING_AUTHORIZED, STOPPED, APPROACHING.
 Default is safe: no /cmd_vel published. PID follow controller (separate node)
-subscribes to /follow_target_active and moves only when this FSM is FOLLOWING
-or APPROACHING. Optional speaker ACK via /sound/play_sound_id service.
+subscribes to /follow_target_active and moves only when this FSM is FOLLOWING,
+FOLLOWING_AUTHORIZED, or APPROACHING. Optional speaker ACK via
+/sound/play_sound_id service.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from std_msgs.msg import Bool, String
 from cs603_voice_intent.intent_classifier import (
     CMD_APPROACH,
     CMD_FOLLOW,
+    CMD_FOLLOW_AUTHORIZED,
     CMD_STOP,
     CMD_UNKNOWN,
 )
@@ -25,11 +27,13 @@ from cs603_voice_intent.intent_classifier import (
 
 STATE_IDLE = "IDLE"
 STATE_FOLLOWING = "FOLLOWING"
+STATE_FOLLOWING_AUTHORIZED = "FOLLOWING_AUTHORIZED"
 STATE_STOPPED = "STOPPED"
 STATE_APPROACHING = "APPROACHING"
 
 INTENT_TO_STATE = {
     CMD_FOLLOW: STATE_FOLLOWING,
+    CMD_FOLLOW_AUTHORIZED: STATE_FOLLOWING_AUTHORIZED,
     CMD_STOP: STATE_STOPPED,
     CMD_APPROACH: STATE_APPROACHING,
 }
@@ -97,7 +101,11 @@ class BehaviorFsm(Node):
         self._state_pub.publish(msg)
 
         active = Bool()
-        active.data = self.state in (STATE_FOLLOWING, STATE_APPROACHING)
+        active.data = self.state in (
+            STATE_FOLLOWING,
+            STATE_FOLLOWING_AUTHORIZED,
+            STATE_APPROACHING,
+        )
         self._follow_active_pub.publish(active)
 
         self.get_logger().debug(
