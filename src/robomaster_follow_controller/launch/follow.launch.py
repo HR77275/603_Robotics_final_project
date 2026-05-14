@@ -20,6 +20,13 @@ def generate_launch_description():
     follow_distance_m = LaunchConfiguration('follow_distance_m')
     approach_distance_m = LaunchConfiguration('approach_distance_m')
     require_fsm_active = LaunchConfiguration('require_fsm_active')
+    enable_lost_target_search = LaunchConfiguration('enable_lost_target_search')
+    search_target_timeout_sec = LaunchConfiguration('search_target_timeout_sec')
+    search_angular_radps = LaunchConfiguration('search_angular_radps')
+    enable_obstacle_avoidance = LaunchConfiguration('enable_obstacle_avoidance')
+    range_topic = LaunchConfiguration('range_topic')
+    obstacle_stop_distance_m = LaunchConfiguration('obstacle_stop_distance_m')
+    obstacle_slow_distance_m = LaunchConfiguration('obstacle_slow_distance_m')
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -57,6 +64,45 @@ def generate_launch_description():
             default_value='true',
             description='Require /follow_target_active from the voice behavior FSM.',
         ),
+        DeclareLaunchArgument(
+            'enable_lost_target_search',
+            default_value='true',
+            description='Rotate in place in FOLLOWING mode after target loss.',
+        ),
+        DeclareLaunchArgument(
+            'search_target_timeout_sec',
+            default_value='5.0',
+            description='Seconds to wait for a follow target before searching.',
+        ),
+        DeclareLaunchArgument(
+            'search_angular_radps',
+            default_value='0.25',
+            description='Slow in-place search rotation speed.',
+        ),
+        DeclareLaunchArgument(
+            'enable_obstacle_avoidance',
+            default_value='true',
+            description='Use the front ToF range topic to slow or stop forward motion.',
+        ),
+        DeclareLaunchArgument(
+            'range_topic',
+            default_value='/range_0',
+            description='Front ToF sensor_msgs/Range topic from robomaster_ros.',
+        ),
+        DeclareLaunchArgument(
+            'obstacle_stop_distance_m',
+            default_value='0.45',
+            description=(
+                'Stop forward motion when front ToF is at or below this distance.'
+            ),
+        ),
+        DeclareLaunchArgument(
+            'obstacle_slow_distance_m',
+            default_value='0.9',
+            description=(
+                'Begin scaling down forward speed below this front ToF distance.'
+            ),
+        ),
         Node(
             package='robomaster_follow_controller',
             executable='follow_node',
@@ -71,6 +117,31 @@ def generate_launch_description():
                     'follow_distance_m': ParameterValue(follow_distance_m, value_type=float),
                     'approach_distance_m': ParameterValue(approach_distance_m, value_type=float),
                     'require_fsm_active': ParameterValue(require_fsm_active, value_type=bool),
+                    'enable_lost_target_search': ParameterValue(
+                        enable_lost_target_search,
+                        value_type=bool,
+                    ),
+                    'search_target_timeout_sec': ParameterValue(
+                        search_target_timeout_sec,
+                        value_type=float,
+                    ),
+                    'search_angular_radps': ParameterValue(
+                        search_angular_radps,
+                        value_type=float,
+                    ),
+                    'enable_obstacle_avoidance': ParameterValue(
+                        enable_obstacle_avoidance,
+                        value_type=bool,
+                    ),
+                    'range_topic': range_topic,
+                    'obstacle_stop_distance_m': ParameterValue(
+                        obstacle_stop_distance_m,
+                        value_type=float,
+                    ),
+                    'obstacle_slow_distance_m': ParameterValue(
+                        obstacle_slow_distance_m,
+                        value_type=float,
+                    ),
                 },
             ],
         ),

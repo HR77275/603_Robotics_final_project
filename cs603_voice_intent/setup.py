@@ -31,6 +31,7 @@ setup(
             "voice_cmd_vel_bridge = cs603_voice_intent.voice_cmd_vel_bridge:main",
             "object_trigger_stub = cs603_voice_intent.object_trigger_stub:main",
             "behavior_fsm = cs603_voice_intent.behavior_fsm:main",
+            "arm_gripper_node = cs603_voice_intent.arm_gripper_node:main",
         ],
     },
 )

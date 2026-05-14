@@ -6,6 +6,8 @@ follow_node:
     cmd_vel_topic: /cmd_vel
     follow_active_topic: /follow_target_active
     behavior_state_topic: /behavior_state
+    range_topic: /range_0
+    obstacle_detected_topic: /obstacle_detected
     target_track_id: -1
     target_distance_m: 1.5
     follow_distance_m: 1.5
@@ -31,3 +33,15 @@ follow_node:
       - recognized
       - cached
     identity_stale_timeout_sec: 2.5
+    enable_lost_target_search: true
+    search_target_timeout_sec: 5.0
+    search_angular_radps: 0.25
+    search_direction: 1.0
+    enable_obstacle_avoidance: true
+    obstacle_range_stale_timeout_sec: 0.75
+    obstacle_stop_distance_m: 0.45
+    obstacle_slow_distance_m: 0.9
+    obstacle_min_forward_scale: 0.25
+    obstacle_turn_when_blocked: true
+    obstacle_turn_angular_radps: 0.35
+    obstacle_turn_direction: 1.0

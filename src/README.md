@@ -16,7 +16,8 @@ Inputs:
 
 - `/camera/image_color` (`sensor_msgs/msg/Image`): robot camera feed.
 - `/vision` (`robomaster_msgs/msg/Detection`): built-in RoboMaster detections.
-- `/range_0` (`sensor_msgs/msg/Range`): front ToF sensor, when enabled.
+- `/range_0` (`sensor_msgs/msg/Range`): front ToF sensor, when enabled. It is
+  used both for depth scaling and follow-controller obstacle avoidance.
 
 Outputs:
 
@@ -25,6 +26,7 @@ Outputs:
 - `/people/identities` (`robomaster_perception_msgs/msg/PeopleIdentities`): optional face identity per track ID.
 - `/perception/tracking_debug_image` (`sensor_msgs/msg/Image`): camera feed with bbox, track ID, name, and depth overlay.
 - `/cmd_vel` (`geometry_msgs/msg/Twist`): follow controller velocity command output.
+- `/obstacle_detected` (`std_msgs/msg/Bool`): true when fresh front ToF data is inside the slowdown zone.
 
 
 ## Fresh Setup Dependencies
@@ -176,10 +178,12 @@ The follow controller is in `robomaster_follow_controller`. It subscribes to:
 
 - `/people/depth` (`robomaster_perception_msgs/msg/PeopleDepth`) for target depth and normalized bbox center.
 - `/perception/tracking_debug_image` (`sensor_msgs/msg/Image`) to stay synchronized with the annotated camera stream.
+- `/range_0` (`sensor_msgs/msg/Range`) for front ToF obstacle avoidance.
 
 It publishes:
 
 - `/cmd_vel` (`geometry_msgs/msg/Twist`) for chassis motion.
+- `/obstacle_detected` (`std_msgs/msg/Bool`) for the current slowdown/stop state.
 
 Start it after the robot driver and perception pipeline are running:
 
@@ -199,6 +203,19 @@ Follow a specific track ID instead of the closest person:
 ros2 launch robomaster_follow_controller follow.launch.py target_track_id:=3 target_distance_m:=1.5
 ```
 
+Obstacle avoidance is enabled by default. With fresh `/range_0` data, forward
+motion is scaled down below `obstacle_slow_distance_m` and stopped at
+`obstacle_stop_distance_m`. Disable it only for controlled tests:
+
+```bash
+ros2 launch robomaster_follow_controller follow.launch.py enable_obstacle_avoidance:=false
+```
+
+Lost-target search is also enabled by default. In `FOLLOWING` mode, if no valid
+person target is available for `search_target_timeout_sec` seconds, the robot
+rotates in place at `search_angular_radps` until `/people/depth` contains a
+valid person again. It does not run in `APPROACHING`.
+
 Local controller test without the robot/perception stack:
 
 ```bash
@@ -212,7 +229,8 @@ ros2 launch robomaster_follow_controller follow.launch.py enable_motion:=false
 ros2 topic echo /cmd_vel --once --no-daemon
 ```
 
-Tune PID and speed limits in `robomaster_follow_controller/config/follow.yaml`.
+Tune PID, speed limits, and obstacle thresholds in
+`robomaster_follow_controller/config/follow.yaml`.
 
 ## Face Identity Workflow
 
