@@ -19,6 +19,9 @@ def generate_launch_description():
     target_track_id = LaunchConfiguration("target_track_id")
     follow_distance_m = LaunchConfiguration("follow_distance_m")
     approach_distance_m = LaunchConfiguration("approach_distance_m")
+    enable_lost_target_search = LaunchConfiguration("enable_lost_target_search")
+    search_target_timeout_sec = LaunchConfiguration("search_target_timeout_sec")
+    search_angular_radps = LaunchConfiguration("search_angular_radps")
     enable_obstacle_avoidance = LaunchConfiguration("enable_obstacle_avoidance")
     range_topic = LaunchConfiguration("range_topic")
     obstacle_stop_distance_m = LaunchConfiguration("obstacle_stop_distance_m")
@@ -31,6 +34,11 @@ def generate_launch_description():
     drop_x_m = LaunchConfiguration("drop_x_m")
     drop_z_m = LaunchConfiguration("drop_z_m")
     gripper_power = LaunchConfiguration("gripper_power")
+    arm_control_mode = LaunchConfiguration("arm_control_mode")
+    arm_topic_step_delay_sec = LaunchConfiguration("arm_topic_step_delay_sec")
+    continue_after_gripper_close_failure = LaunchConfiguration(
+        "continue_after_gripper_close_failure"
+    )
 
     perception_launch = PathJoinSubstitution(
         [
@@ -100,6 +108,21 @@ def generate_launch_description():
                 description="Target distance for CMD_APPROACH.",
             ),
             DeclareLaunchArgument(
+                "enable_lost_target_search",
+                default_value="true",
+                description="Rotate in FOLLOWING mode after target loss.",
+            ),
+            DeclareLaunchArgument(
+                "search_target_timeout_sec",
+                default_value="5.0",
+                description="Seconds to wait for a follow target before searching.",
+            ),
+            DeclareLaunchArgument(
+                "search_angular_radps",
+                default_value="0.25",
+                description="Slow in-place search rotation speed.",
+            ),
+            DeclareLaunchArgument(
                 "enable_obstacle_avoidance",
                 default_value="true",
                 description=(
@@ -165,6 +188,21 @@ def generate_launch_description():
                 default_value="0.7",
                 description="Gripper open/close power in [0, 1].",
             ),
+            DeclareLaunchArgument(
+                "arm_control_mode",
+                default_value="topic",
+                description="Use move_arm action or target_arm_position topic.",
+            ),
+            DeclareLaunchArgument(
+                "arm_topic_step_delay_sec",
+                default_value="1.0",
+                description="Delay after each topic-based arm position command.",
+            ),
+            DeclareLaunchArgument(
+                "continue_after_gripper_close_failure",
+                default_value="true",
+                description="Lift after a pickup close action reports object-contact failure.",
+            ),
             Node(
                 package="cs603_voice_intent",
                 executable="voice_intent_node",
@@ -201,6 +239,15 @@ def generate_launch_description():
                             gripper_power,
                             value_type=float,
                         ),
+                        "arm_control_mode": arm_control_mode,
+                        "arm_topic_step_delay_sec": ParameterValue(
+                            arm_topic_step_delay_sec,
+                            value_type=float,
+                        ),
+                        "continue_after_gripper_close_failure": ParameterValue(
+                            continue_after_gripper_close_failure,
+                            value_type=bool,
+                        ),
                     }
                 ],
             ),
@@ -227,6 +274,9 @@ def generate_launch_description():
                     "follow_distance_m": follow_distance_m,
                     "approach_distance_m": approach_distance_m,
                     "require_fsm_active": "true",
+                    "enable_lost_target_search": enable_lost_target_search,
+                    "search_target_timeout_sec": search_target_timeout_sec,
+                    "search_angular_radps": search_angular_radps,
                     "enable_obstacle_avoidance": enable_obstacle_avoidance,
                     "range_topic": range_topic,
                     "obstacle_stop_distance_m": obstacle_stop_distance_m,

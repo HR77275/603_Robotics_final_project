@@ -196,6 +196,12 @@ Obstacle avoidance is enabled by default in the follow controller. It slows
 forward motion below `obstacle_slow_distance_m` and stops forward motion at
 `obstacle_stop_distance_m` using the front ToF range topic.
 
+Lost-target search is enabled by default in follow mode. If the robot is in
+`FOLLOWING` and has no valid person track for `search_target_timeout_sec`
+seconds, it rotates slowly in place at `search_angular_radps` until a person is
+tracked again. It stays disabled in approach mode so pick/drop behavior is not
+interrupted.
+
 The arm/gripper pick-drop node is enabled by default in the integration launch.
 It listens for `CMD_PICK` and `CMD_DROP`, but ignores them unless the behavior
 FSM is already in `APPROACHING`. Tune the ground and carry poses with

@@ -3,6 +3,7 @@ from __future__ import annotations
 import signal
 from typing import Any
 
+from geometry_msgs.msg import Point
 import rclpy
 from action_msgs.msg import GoalStatus
 from rclpy.action import ActionClient
@@ -20,6 +21,7 @@ from cs603_voice_intent.arm_gripper_sequence import (
     build_manipulation_sequence,
     is_manipulation_intent,
     should_accept_manipulation,
+    should_continue_after_step_failure,
 )
 from cs603_voice_intent.behavior_fsm import STATE_IDLE
 from cs603_voice_intent.intent_classifier import CMD_DROP, CMD_PICK
@@ -37,6 +39,9 @@ class ArmGripperNode(Node):
         self.declare_parameter("status_topic", "/arm_gripper_status")
         self.declare_parameter("move_arm_action", "move_arm")
         self.declare_parameter("gripper_action", "gripper")
+        self.declare_parameter("target_arm_position_topic", "/target_arm_position")
+        self.declare_parameter("arm_control_mode", "topic")
+        self.declare_parameter("arm_topic_step_delay_sec", 1.0)
         self.declare_parameter("action_server_timeout_sec", 2.0)
         self.declare_parameter("arm_relative", False)
         self.declare_parameter("pick_x_m", 0.16)
@@ -46,18 +51,22 @@ class ArmGripperNode(Node):
         self.declare_parameter("drop_x_m", 0.16)
         self.declare_parameter("drop_z_m", -0.08)
         self.declare_parameter("gripper_power", 0.7)
+        self.declare_parameter("continue_after_gripper_close_failure", True)
 
         self.behavior_state = STATE_IDLE
         self.busy = False
         self.active_intent = ""
         self.sequence: tuple[ManipulationStep, ...] = ()
         self.step_index = 0
+        self.arm_step_timer = None
 
         intent_topic = str(self.get_parameter("intent_topic").value)
         state_topic = str(self.get_parameter("state_topic").value)
         status_topic = str(self.get_parameter("status_topic").value)
+        arm_position_topic = str(self.get_parameter("target_arm_position_topic").value)
 
         self.status_pub = self.create_publisher(String, status_topic, 10)
+        self.arm_position_pub = self.create_publisher(Point, arm_position_topic, 10)
         self.create_subscription(String, intent_topic, self.intent_cb, 10)
         self.create_subscription(String, state_topic, self.state_cb, 10)
 
@@ -74,7 +83,8 @@ class ArmGripperNode(Node):
 
         self.get_logger().info(
             "arm_gripper_node up: "
-            f"intent={intent_topic} state={state_topic} status={status_topic}"
+            f"intent={intent_topic} state={state_topic} status={status_topic} "
+            f"arm_control_mode={self.get_parameter('arm_control_mode').value}"
         )
 
     def state_cb(self, msg: String) -> None:
@@ -122,6 +132,9 @@ class ArmGripperNode(Node):
             ),
             arm_relative=bool(self.get_parameter("arm_relative").value),
             gripper_power=float(self.get_parameter("gripper_power").value),
+            continue_after_gripper_close_failure=bool(
+                self.get_parameter("continue_after_gripper_close_failure").value
+            ),
         )
 
     def start_next_step(self) -> None:
@@ -133,7 +146,10 @@ class ArmGripperNode(Node):
         self.publish_status(f"STEP {self.active_intent}: {step.name}")
 
         if step.kind == STEP_ARM:
-            self.send_arm_goal(step)
+            if self.arm_control_mode() == "topic":
+                self.publish_arm_position(step)
+            else:
+                self.send_arm_goal(step)
         elif step.kind == STEP_GRIPPER:
             self.send_gripper_goal(step)
         else:
@@ -160,6 +176,36 @@ class ArmGripperNode(Node):
                 step_name,
             )
         )
+
+    def publish_arm_position(self, step: ManipulationStep) -> None:
+        if step.pose is None:
+            self.finish_sequence(success=False, detail=f"{step.name} missing pose")
+            return
+
+        msg = Point()
+        msg.x = float(step.pose.x_m)
+        msg.y = 0.0
+        msg.z = float(step.pose.z_m)
+        self.arm_position_pub.publish(msg)
+
+        delay = max(0.1, float(self.get_parameter("arm_topic_step_delay_sec").value))
+        self.arm_step_timer = self.create_timer(delay, self.arm_topic_step_complete_once)
+
+    def arm_topic_step_complete_once(self) -> None:
+        if self.arm_step_timer is not None:
+            self.arm_step_timer.cancel()
+            self.destroy_timer(self.arm_step_timer)
+            self.arm_step_timer = None
+
+        self.step_index += 1
+        self.start_next_step()
+
+    def arm_control_mode(self) -> str:
+        mode = str(self.get_parameter("arm_control_mode").value).strip().lower()
+        if mode not in ("action", "topic"):
+            self.get_logger().warn(f"unknown arm_control_mode={mode!r}; using topic")
+            return "topic"
+        return mode
 
     def send_gripper_goal(self, step: ManipulationStep) -> None:
         if not self.wait_for_action_server(self.gripper_client, "gripper"):
@@ -220,6 +266,20 @@ class ArmGripperNode(Node):
             return
 
         if result.status != GoalStatus.STATUS_SUCCEEDED:
+            step = self.sequence[self.step_index]
+            if should_continue_after_step_failure(
+                self.active_intent,
+                step,
+                self.config(),
+            ):
+                self.publish_status(
+                    f"WARNING {self.active_intent}: {step_name} reported "
+                    f"status {result.status}; continuing to lift"
+                )
+                self.step_index += 1
+                self.start_next_step()
+                return
+
             detail = f"{action_name} {step_name} failed with status {result.status}"
             self.finish_sequence(success=False, detail=detail)
             return
@@ -244,6 +304,10 @@ class ArmGripperNode(Node):
         self.active_intent = ""
         self.sequence = ()
         self.step_index = 0
+        if self.arm_step_timer is not None:
+            self.arm_step_timer.cancel()
+            self.destroy_timer(self.arm_step_timer)
+            self.arm_step_timer = None
 
     def publish_status(self, text: str) -> None:
         msg = String()

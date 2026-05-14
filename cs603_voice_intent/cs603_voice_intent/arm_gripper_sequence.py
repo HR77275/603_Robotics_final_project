@@ -28,6 +28,7 @@ class ManipulationConfig:
     drop_pose: ArmPose = ArmPose(0.16, -0.08)
     arm_relative: bool = False
     gripper_power: float = 0.7
+    continue_after_gripper_close_failure: bool = True
 
 
 @dataclass(frozen=True)
@@ -66,3 +67,16 @@ def build_manipulation_sequence(
         )
 
     return ()
+
+
+def should_continue_after_step_failure(
+    intent: str,
+    step: ManipulationStep,
+    config: ManipulationConfig,
+) -> bool:
+    return (
+        bool(config.continue_after_gripper_close_failure)
+        and intent == CMD_PICK
+        and step.kind == STEP_GRIPPER
+        and step.gripper_target == GRIPPER_CLOSE
+    )

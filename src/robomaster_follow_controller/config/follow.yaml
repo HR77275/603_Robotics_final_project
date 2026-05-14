@@ -28,6 +28,10 @@ follow_node:
     angular_sign: -1.0
     enable_motion: true
     require_fsm_active: true
+    enable_lost_target_search: true
+    search_target_timeout_sec: 5.0
+    search_angular_radps: 0.25
+    search_direction: 1.0
     enable_obstacle_avoidance: true
     obstacle_range_stale_timeout_sec: 0.75
     obstacle_stop_distance_m: 0.45

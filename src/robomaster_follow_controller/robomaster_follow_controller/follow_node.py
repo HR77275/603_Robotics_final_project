@@ -79,6 +79,10 @@ class FollowNode(Node):
         self.declare_parameter('angular_sign', -1.0)
         self.declare_parameter('enable_motion', True)
         self.declare_parameter('require_fsm_active', True)
+        self.declare_parameter('enable_lost_target_search', True)
+        self.declare_parameter('search_target_timeout_sec', 5.0)
+        self.declare_parameter('search_angular_radps', 0.25)
+        self.declare_parameter('search_direction', 1.0)
         self.declare_parameter('enable_obstacle_avoidance', True)
         self.declare_parameter('obstacle_range_stale_timeout_sec', 0.75)
         self.declare_parameter('obstacle_stop_distance_m', 0.45)
@@ -93,9 +97,11 @@ class FollowNode(Node):
         self.image_height = None
         self.latest_range_m = None
         self.last_target_time = None
+        self.target_missing_since = None
         self.last_range_time = None
         self.last_control_time = self.get_clock().now()
         self.sent_stop = True
+        self.searching_for_target = False
         self.last_obstacle_detected = None
         self.fsm_active = not bool(self.get_parameter('require_fsm_active').value)
         self.behavior_state = 'IDLE'
@@ -164,7 +170,8 @@ class FollowNode(Node):
             f"{self.get_parameter('people_depth_topic').value}; "
             f"range topic={self.get_parameter('range_topic').value}; "
             f"FSM active required={self.get_parameter('require_fsm_active').value}; "
-            f"obstacle avoidance={self.get_parameter('enable_obstacle_avoidance').value}"
+            f"obstacle avoidance={self.get_parameter('enable_obstacle_avoidance').value}; "
+            f"lost target search={self.get_parameter('enable_lost_target_search').value}"
         )
 
     def image_cb(self, msg):
@@ -189,6 +196,8 @@ class FollowNode(Node):
 
         if self.target is not None:
             self.last_target_time = self.get_clock().now()
+            self.target_missing_since = None
+            self.searching_for_target = False
 
     def range_cb(self, msg):
         if not valid_range(msg.range, msg.min_range, msg.max_range):
@@ -205,8 +214,12 @@ class FollowNode(Node):
 
     def behavior_state_cb(self, msg):
         state = (msg.data or '').strip()
+        prev_state = self.behavior_state
         self.behavior_state = state
         if state == STATE_FOLLOWING:
+            if prev_state != STATE_FOLLOWING:
+                self.target_missing_since = self.get_clock().now()
+                self.searching_for_target = False
             self.set_parameters([
                 Parameter(
                     'target_distance_m',
@@ -215,6 +228,8 @@ class FollowNode(Node):
                 )
             ])
         elif state == STATE_APPROACHING:
+            self.target_missing_since = None
+            self.searching_for_target = False
             self.set_parameters([
                 Parameter(
                     'target_distance_m',
@@ -223,6 +238,8 @@ class FollowNode(Node):
                 )
             ])
         elif state:
+            self.target_missing_since = None
+            self.searching_for_target = False
             self.publish_stop()
 
     def clamp(self, value, limit):
@@ -234,8 +251,26 @@ class FollowNode(Node):
             self.cmd_pub.publish(Twist())
             self.sent_stop = True
         self.publish_obstacle_status(False)
+        self.searching_for_target = False
         self.pid_dist.reset()
         self.pid_center.reset()
+
+    def publish_search_command(self):
+        self.pid_dist.reset()
+        self.pid_center.reset()
+        self.publish_obstacle_status(False)
+
+        cmd = Twist()
+        if bool(self.get_parameter('enable_motion').value):
+            direction = 1.0 if float(self.get_parameter('search_direction').value) >= 0.0 else -1.0
+            angular_z = direction * abs(float(self.get_parameter('search_angular_radps').value))
+            cmd.angular.z = self.clamp(angular_z, self.get_parameter('max_angular_radps').value)
+
+        self.cmd_pub.publish(cmd)
+        self.sent_stop = False
+        if not self.searching_for_target:
+            self.get_logger().info('No follow target found; rotating in place to search.')
+        self.searching_for_target = True
 
     def publish_obstacle_status(self, detected):
         detected = bool(detected)
@@ -267,6 +302,26 @@ class FollowNode(Node):
             return None
         return self.latest_range_m
 
+    def handle_missing_follow_target(self, now, missing_since=None):
+        if self.behavior_state != STATE_FOLLOWING:
+            self.publish_stop()
+            return
+
+        if missing_since is None:
+            missing_since = self.target_missing_since
+
+        if missing_since is None:
+            missing_since = now
+        self.target_missing_since = missing_since
+
+        missing_age = (now - missing_since).nanoseconds * 1e-9
+        timeout = float(self.get_parameter('search_target_timeout_sec').value)
+        if bool(self.get_parameter('enable_lost_target_search').value) and missing_age >= timeout:
+            self.publish_search_command()
+            return
+
+        self.publish_stop()
+
     def control_loop(self):
         now = self.get_clock().now()
         dt = (now - self.last_control_time).nanoseconds * 1e-9
@@ -277,13 +332,16 @@ class FollowNode(Node):
             return
 
         if self.target is None or self.last_target_time is None:
-            self.publish_stop()
+            self.handle_missing_follow_target(now)
             return
 
         age = (now - self.last_target_time).nanoseconds * 1e-9
         if age > float(self.get_parameter('stale_timeout_sec').value):
-            self.publish_stop()
+            self.handle_missing_follow_target(now)
             return
+
+        self.target_missing_since = None
+        self.searching_for_target = False
 
         depth_error = self.target.depth_m - float(self.get_parameter('target_distance_m').value)
         center_error = self.target.roi.x_offset - 0.5

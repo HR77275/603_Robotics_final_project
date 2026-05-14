@@ -211,6 +211,11 @@ motion is scaled down below `obstacle_slow_distance_m` and stopped at
 ros2 launch robomaster_follow_controller follow.launch.py enable_obstacle_avoidance:=false
 ```
 
+Lost-target search is also enabled by default. In `FOLLOWING` mode, if no valid
+person target is available for `search_target_timeout_sec` seconds, the robot
+rotates in place at `search_angular_radps` until `/people/depth` contains a
+valid person again. It does not run in `APPROACHING`.
+
 Local controller test without the robot/perception stack:
 
 ```bash
