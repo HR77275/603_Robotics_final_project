@@ -278,6 +278,7 @@ class FollowDistanceEvalNode(Node):
         if path is None:
             return
 
+        min_depth_m, max_depth_m = self.depth_range
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", newline="") as stream:
             writer = csv.DictWriter(
