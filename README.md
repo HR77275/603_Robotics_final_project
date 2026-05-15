@@ -1,6 +1,6 @@
-# CS603 RoboMaster Voice + Perception Demo
+# CS603 Final Project
 
-This repository contains the CS603 RoboMaster integration code:
+This repository contains the CS603 project code:
 
 - `cs603_voice_intent`: voice/text intent classification, FSM, web voice UI, and arm/gripper sequencing.
 - `robomaster_perception`: person tracking, depth estimation, face identity, and tracking overlay.
@@ -26,9 +26,9 @@ export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
 For the physical RoboMaster EP used in the demo:
 
 ```bash
-export ROBOMASTER_LOCAL_IP=10.0.0.235
-export ROBOMASTER_ROBOT_IP=10.0.0.202
-export ROBOMASTER_SERIAL=3JKCH7T001009X
+export ROBOMASTER_LOCAL_IP=<LOCAL_IP>
+export ROBOMASTER_ROBOT_IP=<ROBOT_IP>
+export ROBOMASTER_SERIAL=<SERIAL_NUM>
 ```
 
 ## Compile
@@ -81,13 +81,13 @@ source install/setup.bash
 export ROS_DOMAIN_ID=23
 export ROS_LOCALHOST_ONLY=0
 export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-export ROBOMASTER_LOCAL_IP=10.0.0.235
-export ROBOMASTER_ROBOT_IP=10.0.0.202
+export ROBOMASTER_LOCAL_IP=<LOCAL_IP>
+export ROBOMASTER_ROBOT_IP=<ROBOT_IP>
 
 ros2 launch robomaster_ros main.launch \
   model:=ep \
   conn_type:=sta \
-  serial_number:=3JKCH7T001009X \
+  serial_number:=<SERIAL_NUM> \
   chassis_timeout:=0.5 \
   camera:=true \
   video_raw:=1 \
