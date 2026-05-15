@@ -6,8 +6,59 @@ This repository contains the CS603 project code:
 - `robomaster_perception`: person tracking, depth estimation, face identity, and tracking overlay.
 - `robomaster_follow_controller`: FSM-gated person-following controller and follow-distance evaluator.
 
-This README assumes ROS 2 Humble, `robomaster_ros`, the RoboMaster Python stack,
-and Python dependencies are already installed in `~/robomaster_ws`.
+This README assumes ROS 2 Humble, `robomaster_ros`, and the RoboMaster Python
+stack are already installed in `~/robomaster_ws`. The project-specific packages
+and model assets below are still required for a reproducible run.
+
+## Project-Specific Setup
+
+Run these once after the base ROS/RoboMaster workspace is available:
+
+```bash
+cd ~/robomaster_ws
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+sudo apt install -y ffmpeg portaudio19-dev python3-opencv
+
+python3 -m pip install --user --upgrade pip setuptools wheel
+python3 -m pip install --user torch torchvision
+python3 -m pip install --user \
+  numpy openai-whisper sounddevice "coverage>=7.6"
+python3 -m pip install --user \
+  -r src/603_Robotics_final_project/src/robomaster_perception/requirements-ml.txt
+```
+
+Install a CUDA-enabled PyTorch build instead of the generic `torch torchvision`
+command when the depth model should run on the GPU. If running CPU-only, keep the
+same packages but change the perception config to use `device: cpu` and
+`embedder_gpu: false`.
+
+The first perception or voice run downloads several model assets into the user
+cache. Preload them while internet access is available:
+
+```bash
+python3 -c "import whisper; whisper.load_model('base.en'); whisper.load_model('small')"
+python3 -c "from transformers import AutoImageProcessor, AutoModelForDepthEstimation; m='depth-anything/Depth-Anything-V2-Metric-Indoor-Small-hf'; AutoImageProcessor.from_pretrained(m); AutoModelForDepthEstimation.from_pretrained(m)"
+python3 -c "from insightface.app import FaceAnalysis; app=FaceAnalysis(name='buffalo_l', providers=['CPUExecutionProvider']); app.prepare(ctx_id=-1, det_size=(640, 640))"
+python3 -c "from deep_sort_realtime.deepsort_tracker import DeepSort; DeepSort(embedder='mobilenet', embedder_gpu=False)"
+```
+
+For `CMD_FOLLOW_AUTHORIZED`, build the face identity database after adding images:
+
+```bash
+cd ~/robomaster_ws/src/603_Robotics_final_project
+mkdir -p face_db/images/Person_A face_db/embeddings
+# Add clear face images under face_db/images/Person_A/
+
+cd ~/robomaster_ws
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+ros2 run robomaster_perception enroll_faces \
+  --image-dir src/603_Robotics_final_project/face_db/images \
+  --output src/603_Robotics_final_project/face_db/embeddings/face_db.npz
+```
 
 ## Environment
 
@@ -333,4 +384,3 @@ ros2 topic echo /arm_gripper_status
 ```
 
 `CMD_PICK` and `CMD_DROP` run only when the FSM is `APPROACHING` or `STOPPED`.
-
