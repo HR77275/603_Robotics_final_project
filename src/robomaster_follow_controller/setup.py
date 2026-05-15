@@ -6,7 +6,7 @@ package_name = 'robomaster_follow_controller'
 setup(
     name=package_name,
     version='0.0.0',
-    packages=find_packages(exclude=['test']),
+    packages=find_packages(),
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
@@ -20,7 +20,6 @@ setup(
     maintainer_email='humble_ros2@example.com',
     description='RoboMaster person following controller using perception depth and tracked image output.',
     license='MIT',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'follow_node = robomaster_follow_controller.follow_node:main',

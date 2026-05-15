@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""WSL/Ubuntu web voice panel for the CS603 RoboMaster demo.
-
-The server has one safety boundary: it publishes std_msgs/String intents only.
-It never publishes /cmd_vel or starts the motion bridge.
-"""
+"""Web voice panel that publishes voice intent strings."""
 
 from __future__ import annotations
 
@@ -38,7 +34,7 @@ TOKEN_PLACEHOLDER = "__CS603_VOICE_DEMO_TOKEN__"
 
 sys.path.insert(0, str(VOICE_PACKAGE_PATH))
 
-from cs603_voice_intent.intent_classifier import classify_intent  # noqa: E402
+from cs603_voice_intent.intent_classifier import classify_intent
 
 
 class VoiceIntentServer(ThreadingHTTPServer):
@@ -65,7 +61,7 @@ class VoiceIntentServer(ThreadingHTTPServer):
 class VoiceIntentHandler(BaseHTTPRequestHandler):
     server: VoiceIntentServer
 
-    def do_GET(self) -> None:  # noqa: N802
+    def do_GET(self) -> None:
         if self.path == "/":
             page = FRONTEND_PATH.read_text(encoding="utf-8").replace(TOKEN_PLACEHOLDER, self.server.token)
             self._send_bytes(page.encode("utf-8"), "text/html; charset=utf-8")
@@ -75,7 +71,7 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
             return
         self.send_error(404)
 
-    def do_POST(self) -> None:  # noqa: N802
+    def do_POST(self) -> None:
         if self.path == "/api/intent":
             self._handle_intent()
             return
@@ -109,7 +105,7 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
                     "stderr": result.stderr[-2000:],
                 }
             )
-        except Exception as exc:  # noqa: BLE001 - expose demo-time failures.
+        except Exception as exc:
             self._send_json({"ok": False, "error": str(exc)}, status=500)
 
     def _handle_transcribe(self) -> None:
@@ -159,12 +155,12 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
                             "stderr": result.stderr[-2000:],
                         }
                     )
-                except Exception as pub_exc:  # noqa: BLE001 - keep transcript visible even if ROS publish fails
+                except Exception as pub_exc:
                     response["intent"] = intent
                     response["publish_error"] = str(pub_exc)
 
             self._send_json(response)
-        except Exception as exc:  # noqa: BLE001 - surface demo-time failures.
+        except Exception as exc:
             self._send_json({"ok": False, "error": str(exc)}, status=500)
         finally:
             if tmp_audio and os.path.exists(tmp_audio):
@@ -198,7 +194,7 @@ class VoiceIntentHandler(BaseHTTPRequestHandler):
                 "ros_setup_files": self.server.ros_setup_files,
                 "error": "" if ok else (result.stderr or result.stdout).strip(),
             }
-        except Exception as exc:  # noqa: BLE001 - demo health endpoint.
+        except Exception as exc:
             return {"ok": False, "ros_setup_files": self.server.ros_setup_files, "error": str(exc)}
 
     def _send_json(self, payload: dict[str, Any], status: int = 200) -> None:
@@ -279,7 +275,7 @@ class WhisperTranscriber:
             if self._model is not None:
                 return
             prepare_whisper_import()
-            import whisper  # noqa: PLC0415 - load only when the server starts.
+            import whisper
 
             kwargs = {"device": self.device} if self.device else {}
             self._model = whisper.load_model(self.model_name, **kwargs)

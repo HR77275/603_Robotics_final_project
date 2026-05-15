@@ -13,8 +13,6 @@ from cs603_voice_intent.intent_classifier import classify_intent
 
 
 class VoiceIntentNode(Node):
-    """Publish classified voice commands as std_msgs/String on /voice_intent."""
-
     def __init__(self) -> None:
         super().__init__("voice_intent_node")
         self.declare_parameter("input_mode", "stdin")
@@ -89,7 +87,7 @@ class VoiceIntentNode(Node):
             model = whisper.load_model(model_name)
             result = model.transcribe(wav_path)
             self._transcripts.put(str(result.get("text", "")).strip())
-        except Exception as exc:  # noqa: BLE001 - surface demo-time hardware/audio failures.
+        except Exception as exc:
             self.get_logger().error(f"mic_once transcription failed: {exc}")
             self._fatal_error = True
         finally:

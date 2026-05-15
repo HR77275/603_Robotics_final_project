@@ -29,8 +29,6 @@ from robomaster_msgs.action import GripperControl, MoveArm
 
 
 class ArmGripperNode(Node):
-    """Runs pick/drop arm sequences while the behavior FSM is APPROACHING or STOPPED."""
-
     def __init__(self) -> None:
         super().__init__("arm_gripper_node")
 
@@ -245,7 +243,7 @@ class ArmGripperNode(Node):
     def goal_response_cb(self, future: Any, action_name: str, step_name: str) -> None:
         try:
             goal_handle = future.result()
-        except Exception as exc:  # pragma: no cover - defensive ROS callback guard.
+        except Exception as exc:
             self.finish_sequence(success=False, detail=f"{action_name} goal error: {exc}")
             return
 
@@ -261,7 +259,7 @@ class ArmGripperNode(Node):
     def result_cb(self, future: Any, action_name: str, step_name: str) -> None:
         try:
             result = future.result()
-        except Exception as exc:  # pragma: no cover - defensive ROS callback guard.
+        except Exception as exc:
             self.finish_sequence(success=False, detail=f"{action_name} result error: {exc}")
             return
 

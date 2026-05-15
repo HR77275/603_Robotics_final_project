@@ -29,8 +29,6 @@ PHASE_DONE = "done"
 
 
 class FollowDistanceEvalNode(Node):
-    """Evaluate how tightly the follower holds a target depth over several trials."""
-
     def __init__(self) -> None:
         super().__init__("follow_distance_eval")
 
@@ -249,7 +247,6 @@ class FollowDistanceEvalNode(Node):
         path = Path(output_csv).expanduser()
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", newline="") as stream:
-            min_depth_m, max_depth_m = self.depth_range
             writer = csv.DictWriter(
                 stream,
                 fieldnames=list(DistanceTrialMetrics.__dataclass_fields__),

@@ -73,11 +73,3 @@ ros2 run robomaster_follow_controller follow_distance_eval --ros-args \
   -p require_following_state:=false
 ```
 
-## Recorded Results
-
-Follow-distance evaluation runs should be stored under `docs/evaluations/`.
-The May 14, 2026 trials are recorded in:
-
-- `docs/evaluations/follow_distance_eval_2026-05-14.md`
-- `docs/evaluations/follow_distance_eval_2026-05-14_trials.csv`
-- `docs/evaluations/follow_distance_eval_2026-05-14_summary.csv`

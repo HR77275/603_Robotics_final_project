@@ -1,386 +1,221 @@
-# RoboMaster EP ROS 2 Humble Setup
+# CS603 RoboMaster Voice + Perception Demo
 
-This project uses a DJI RoboMaster EP with ROS 2 Humble on Ubuntu 22.04. It documents how to install the ROS driver, connect to the robot over Wi-Fi, view the camera stream, teleoperate the chassis, and control the arm/gripper.
+This repository contains the CS603 RoboMaster integration code:
 
-## Why ROS 2 Humble
+- `cs603_voice_intent`: voice/text intent classification, FSM, web voice UI, and arm/gripper sequencing.
+- `robomaster_perception`: person tracking, depth estimation, face identity, and tracking overlay.
+- `robomaster_follow_controller`: FSM-gated person-following controller and follow-distance evaluator.
 
-ROS 2 Humble is used because it is the ROS 2 distribution built for Ubuntu 22.04. Foxy was built around Ubuntu 20.04 and is now end-of-life, so Humble is a better choice for a current Ubuntu 22.04 development machine.
-
-References:
-
-- ROS 2 Foxy EOL: https://docs.ros.org/en/foxy/Releases/End-of-Life.html
-- ROS 2 Humble Ubuntu 22.04 support: https://docs.ros.org/en/humble/Releases/Release-Humble-Hawksbill.html
+This README assumes ROS 2 Humble, `robomaster_ros`, the RoboMaster Python stack,
+and Python dependencies are already installed in `~/robomaster_ws`.
 
 ## Environment
 
-- Ubuntu 22.04
-- ROS 2 Humble
-- DJI RoboMaster EP
-- Workspace: `~/robomaster_ws`
-
-## CS603 Voice Intent Quick Start
-
-This section covers the current `cs603_voice_intent` package in a direct Ubuntu
-22.04 or WSL Ubuntu 22.04 setup. It assumes the repository is checked out at:
+Use this setup in every terminal:
 
 ```bash
-export ROBOMASTER_WS="${ROBOMASTER_WS:-$HOME/robomaster_ws}"
-export CS603_PROJECT="$ROBOMASTER_WS/src/603_Robotics_final_project"
-```
-
-### Requirements
-
-- Ubuntu 22.04 or WSL Ubuntu 22.04
-- ROS 2 Humble
-- Python 3.10
-- `colcon`
-- `geometry_msgs`, `std_msgs`, `rclpy`, `launch`, and `launch_ros`
-- Optional for microphone/Whisper testing: `ffmpeg`, `portaudio19-dev`,
-  `openai-whisper`, `sounddevice`, and `numpy`
-- Optional for physical robot motion: RoboMaster EP, `robomaster_ros`, robot
-  network access, and a clear test area with emergency stop ready
-
-### Install
-
-Install ROS/package tooling:
-
-```bash
-sudo apt update
-sudo apt install -y \
-  python3-colcon-common-extensions \
-  python3-pip \
-  ffmpeg \
-  portaudio19-dev \
-  ros-humble-geometry-msgs \
-  ros-humble-launch \
-  ros-humble-launch-ros \
-  ros-humble-rclpy \
-  ros-humble-std-msgs
-```
-
-Install optional Whisper dependencies:
-
-```bash
-python3 -m pip install --user --upgrade pip setuptools wheel
-python3 -m pip install --user openai-whisper sounddevice numpy
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
-```
-
-Build the voice package:
-
-```bash
+cd ~/robomaster_ws
 source /opt/ros/humble/setup.bash
-cd "$ROBOMASTER_WS"
+source install/setup.bash
+
+export ROS_DOMAIN_ID=23
+export ROS_LOCALHOST_ONLY=0
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+```
+
+For the physical RoboMaster EP used in the demo:
+
+```bash
+export ROBOMASTER_LOCAL_IP=10.0.0.235
+export ROBOMASTER_ROBOT_IP=10.0.0.202
+export ROBOMASTER_SERIAL=3JKCH7T001009X
+```
+
+## Compile
+
+Build the full project:
+
+```bash
+cd ~/robomaster_ws
+source /opt/ros/humble/setup.bash
+colcon build
+source install/setup.bash
+```
+
+Build only the project packages after local edits:
+
+```bash
+cd ~/robomaster_ws
+source /opt/ros/humble/setup.bash
+colcon build --packages-select \
+  robomaster_perception_msgs \
+  robomaster_perception \
+  robomaster_follow_controller \
+  cs603_voice_intent
+source install/setup.bash
+```
+
+If only voice/FSM/web/arm code changed:
+
+```bash
 colcon build --packages-select cs603_voice_intent
-source "$ROBOMASTER_WS/install/setup.bash"
+source install/setup.bash
 ```
 
-Every new terminal should source ROS and the workspace:
+If only following/evaluation code changed:
 
 ```bash
+colcon build --packages-select robomaster_follow_controller
+source install/setup.bash
+```
+
+## Standard Run
+
+### Terminal 1: Robot Driver
+
+```bash
+cd ~/robomaster_ws
 source /opt/ros/humble/setup.bash
-source "${ROBOMASTER_WS:-$HOME/robomaster_ws}/install/setup.bash"
+source install/setup.bash
+
+export ROS_DOMAIN_ID=23
+export ROS_LOCALHOST_ONLY=0
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export ROBOMASTER_LOCAL_IP=10.0.0.235
+export ROBOMASTER_ROBOT_IP=10.0.0.202
+
+ros2 launch robomaster_ros main.launch \
+  model:=ep \
+  conn_type:=sta \
+  serial_number:=3JKCH7T001009X \
+  chassis_timeout:=0.5 \
+  camera:=true \
+  video_raw:=1 \
+  vision_targets:='["person"]' \
+  tof_0:=true \
+  tof_rate:=10 \
+  arm:=true \
+  gripper:=true
 ```
 
-### Run Text Tests
-
-Terminal 1:
+### Terminal 2: Integration Stack
 
 ```bash
-ros2 topic echo /voice_intent
-```
-
-Terminal 2:
-
-```bash
-ros2 run cs603_voice_intent voice_intent_node --ros-args -p input_mode:=stdin
-```
-
-Type phrases such as:
-
-```text
-follow me
-stop
-come here
-```
-
-Expected intents are `CMD_FOLLOW`, `CMD_STOP`, and `CMD_APPROACH`.
-
-For `ros2 launch`, use parameter mode instead of typing into the launch
-terminal:
-
-```bash
-ros2 launch cs603_voice_intent voice_demo.launch.py input_mode:=param stub_text:="follow me"
-ros2 param set /voice_intent_node stub_text "stop"
-```
-
-### Run Whisper/Web Voice Demo
-
-Start the local WSL/Ubuntu web bridge:
-
-```bash
-cd "$CS603_PROJECT"
+cd ~/robomaster_ws
 source /opt/ros/humble/setup.bash
-source "$ROBOMASTER_WS/install/setup.bash"
-python3 tools/voice_web_demo/server.py --host 0.0.0.0 --port 8765 --allow-lan-publish --token cs603-demo-local
+source install/setup.bash
+
+export ROS_DOMAIN_ID=23
+export ROS_LOCALHOST_ONLY=0
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+
+ros2 launch cs603_voice_intent integration_demo.launch.py \
+  start_perception:=true \
+  use_depth:=true \
+  use_identity:=false \
+  enable_motion:=true \
+  enable_arm_gripper:=true \
+  input_mode:=param \
+  stub_text:="" \
+  arm_control_mode:=topic \
+  follow_distance_m:=1.5 \
+  approach_distance_m:=0.8 \
+  gripper_power:=0.7
 ```
 
-Open this in the Windows or Ubuntu browser:
+### Terminal 3: Web Voice UI
+
+```bash
+cd ~/robomaster_ws/src/603_Robotics_final_project
+source /opt/ros/humble/setup.bash
+source ~/robomaster_ws/install/setup.bash
+
+export ROS_DOMAIN_ID=23
+export ROS_LOCALHOST_ONLY=0
+export RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+
+python3 tools/voice_web_demo/server.py \
+  --host 0.0.0.0 \
+  --port 8765 \
+  --allow-lan-publish \
+  --token cs603-demo-local
+```
+
+Open:
 
 ```text
 http://127.0.0.1:8765
 ```
 
-The browser records audio, the WSL server runs local Whisper, and the server
-publishes classified intents on `/voice_intent`.
+## Command Flow
 
-Useful knobs:
+The voice/web path publishes `/voice_intent`. The FSM converts that into
+`/behavior_state` and `/follow_target_active`. The follow controller moves only
+when the FSM allows it.
 
-```bash
-CS603_WHISPER_MODEL=tiny.en python3 tools/voice_web_demo/server.py
-CS603_WHISPER_MODEL=base.en python3 tools/voice_web_demo/server.py
-CS603_ROS_SETUP="$ROBOMASTER_WS/install/setup.bash" python3 tools/voice_web_demo/server.py
-```
+Useful command phrases:
 
-### Run Physical Robot Demo
+| Phrase | Intent | Behavior |
+| --- | --- | --- |
+| `follow me` | `CMD_FOLLOW` | Follow closest tracked person at follow distance. |
+| `follow authorized` | `CMD_FOLLOW_AUTHORIZED` | Follow recognized person only. |
+| `come here` | `CMD_APPROACH` | Approach to pickup/drop distance. |
+| `stop` | `CMD_STOP` | Stop chassis motion. |
+| `pick up` | `CMD_PICK` | Run pickup sequence when stopped or approaching. |
+| `drop it` | `CMD_DROP` | Run drop sequence when stopped or approaching. |
 
-Only enable motion after the RoboMaster driver is connected, the robot has room
-to move, and the emergency stop command is ready.
-
-Bench-test the full voice/FSM/follow-controller path with fake perception and
-motion disabled:
-
-```bash
-ros2 launch cs603_voice_intent integration_demo.launch.py \
-  start_perception:=false \
-  use_fake_perception:=true \
-  enable_motion:=false \
-  input_mode:=param \
-  stub_text:="follow me"
-```
-
-Run the real perception/FSM/follow stack with motion disabled:
+Send commands without speech:
 
 ```bash
-ros2 launch cs603_voice_intent integration_demo.launch.py \
-  start_perception:=true \
-  use_depth:=true \
-  enable_motion:=false
+ros2 param set /voice_intent_node stub_text "follow me"
+ros2 param set /voice_intent_node stub_text "come here"
+ros2 param set /voice_intent_node stub_text "stop"
+ros2 param set /voice_intent_node stub_text "pick up"
+ros2 param set /voice_intent_node stub_text "drop it"
 ```
 
-Enable physical follow motion only after `/behavior_state`,
-`/follow_target_active`, and perception topics look correct:
+Publish direct intent messages:
 
 ```bash
-ros2 launch cs603_voice_intent integration_demo.launch.py \
-  start_perception:=true \
-  use_depth:=true \
-  enable_motion:=true
+ros2 topic pub --once /voice_intent std_msgs/msg/String "{data: CMD_FOLLOW}"
+ros2 topic pub --once /voice_intent std_msgs/msg/String "{data: CMD_APPROACH}"
+ros2 topic pub --once /voice_intent std_msgs/msg/String "{data: CMD_STOP}"
+ros2 topic pub --once /voice_intent std_msgs/msg/String "{data: CMD_PICK}"
+ros2 topic pub --once /voice_intent std_msgs/msg/String "{data: CMD_DROP}"
 ```
 
-Emergency stop:
+## Pickup And Drop
+
+Pickup/drop is intentionally gated by the FSM. Use:
 
 ```bash
-ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{}" --once
+ros2 param set /voice_intent_node stub_text "come here"
+ros2 param set /voice_intent_node stub_text "stop"
+ros2 param set /voice_intent_node stub_text "pick up"
 ```
 
-More detailed voice notes live in
-[`docs/VOICE_INTENT_RUNBOOK.md`](docs/VOICE_INTENT_RUNBOOK.md).
-
-## Install ROS 2 Humble
+Drop flow:
 
 ```bash
-sudo apt update
-sudo apt upgrade -y
-sudo apt install -y locales software-properties-common curl gnupg lsb-release
-
-sudo locale-gen en_US en_US.UTF-8
-sudo update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
-export LANG=en_US.UTF-8
-
-sudo add-apt-repository universe -y
-sudo curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key \
-  -o /usr/share/keyrings/ros-archive-keyring.gpg
-
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(lsb_release -cs) main" | \
-  sudo tee /etc/apt/sources.list.d/ros2.list > /dev/null
-
-sudo apt update
-sudo apt install -y ros-humble-desktop ros-dev-tools
-
-echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
-source ~/.bashrc
+ros2 param set /voice_intent_node stub_text "stop"
+ros2 param set /voice_intent_node stub_text "drop it"
 ```
 
-Verify:
+The arm sequence uses fixed poses from `integration_demo.launch.py`. Place the
+object where the configured pickup pose can reach it.
+
+## Monitoring
 
 ```bash
-echo $ROS_DISTRO
-ros2 doctor --report
+ros2 topic echo /voice_intent
+ros2 topic echo /behavior_state
+ros2 topic echo /follow_target_active
+ros2 topic echo /cmd_vel
+ros2 topic echo /arm_gripper_status
+ros2 topic echo /people/depth
 ```
 
-## Install Dependencies
-
-```bash
-sudo apt update
-sudo apt install -y \
-  python3-colcon-common-extensions \
-  python3-pip \
-  build-essential \
-  cmake \
-  ninja-build \
-  python3-dev \
-  libopus-dev \
-  nasm \
-  netcat-openbsd \
-  ros-humble-xacro \
-  ros-humble-cv-bridge \
-  ros-humble-robot-state-publisher \
-  ros-humble-joint-state-publisher \
-  ros-humble-joy \
-  ros-humble-joy-teleop \
-  ros-humble-teleop-twist-keyboard \
-  ros-humble-rqt-image-view
-
-python3 -m pip install --user --upgrade pip setuptools wheel packaging scikit-build-core cmake ninja
-python3 -m pip install --user --force-reinstall "numpy==1.24.4"
-python3 -m pip install --user -U pyyaml numpy-quaternion
-```
-
-## Install vcpkg and RoboMaster SDK
-
-```bash
-sudo apt install -y curl zip unzip tar
-
-cd ~
-git clone https://github.com/microsoft/vcpkg.git
-cd ~/vcpkg
-./bootstrap-vcpkg.sh
-
-echo 'export VCPKG_ROOT="$HOME/vcpkg"' >> ~/.bashrc
-echo 'export PATH="$VCPKG_ROOT:$PATH"' >> ~/.bashrc
-source ~/.bashrc
-```
-
-Install the SDK and media codec:
-
-```bash
-python3 -m pip install --user git+https://github.com/jeguzzi/RoboMaster-SDK.git
-
-python3 -m pip install --user --no-build-isolation \
-  'rm-libmedia-codec @ git+https://github.com/jeguzzi/RoboMaster-SDK.git#subdirectory=lib/libmedia_codec'
-```
-
-Verify:
-
-```bash
-python3 -c "import robomaster; print('robomaster SDK OK')"
-python3 -c "import libmedia_codec; print('libmedia_codec OK')"
-python3 -c "import cv_bridge; print('cv_bridge OK')"
-```
-
-## Build robomaster_ros
-
-```bash
-mkdir -p ~/robomaster_ws/src
-cd ~/robomaster_ws/src
-git clone https://github.com/jeguzzi/robomaster_ros.git
-
-cd ~/robomaster_ws
-source /opt/ros/humble/setup.bash
-colcon build
-source install/setup.bash
-
-echo "source ~/robomaster_ws/install/setup.bash" >> ~/.bashrc
-```
-
-## Connect to the Robot
-
-Connect the RoboMaster EP and laptop to the same Wi-Fi network. Find the robot IP from the router admin page or the DJI RoboMaster app.
-
-Check connectivity:
-
-```bash
-ping <ROBOT_IP>
-printf "command;version;" | nc -w 5 <ROBOT_IP> 40923
-```
-
-## Direct IP Workaround
-
-If RoboMaster discovery fails but ping and the text SDK work, set the robot and laptop IPs explicitly:
-
-```bash
-export ROBOMASTER_LOCAL_IP=<LAPTOP_IP>
-export ROBOMASTER_ROBOT_IP=<ROBOT_IP>
-```
-
-Patch `~/robomaster_ws/src/robomaster_ros/robomaster_ros/robomaster_ros/client.py` so discovery is skipped when `ROBOMASTER_ROBOT_IP` is set.
-
-Add near the imports:
-
-```python
-import os
-import robomaster.config
-```
-
-Replace `wait_for_robot` with:
-
-```python
-def wait_for_robot(serial_number: Optional[str]) -> None:
-    robot_ip = os.environ.get("ROBOMASTER_ROBOT_IP")
-    local_ip = os.environ.get("ROBOMASTER_LOCAL_IP")
-
-    if robot_ip:
-        robomaster.config.ROBOT_IP_STR = robot_ip
-    if local_ip:
-        robomaster.config.LOCAL_IP_STR = local_ip
-
-    if robot_ip:
-        return
-
-    found = False
-    while not found:
-        try:
-            found = robomaster.conn.scan_robot_ip(user_sn=serial_number)
-        except OSError:
-            pass
-        if not found:
-            time.sleep(random.uniform(1.0, 2.0))
-```
-
-Rebuild:
-
-```bash
-cd ~/robomaster_ws
-colcon build --packages-select robomaster_ros
-source install/setup.bash
-```
-
-## Launch Robot Driver
-
-```bash
-export ROBOMASTER_LOCAL_IP=<LAPTOP_IP>
-export ROBOMASTER_ROBOT_IP=<ROBOT_IP>
-
-ros2 launch robomaster_ros main.launch \
-  model:=ep \
-  conn_type:=sta \
-  serial_number:=<ROBOT_SERIAL_NUMBER> \
-  chassis_timeout:=0.5 \
-  arm:=true \
-  gripper:=true
-```
-
-Successful logs should include:
-
-```text
-Found a robot
-Connected
-Enabled modules: Battery, Camera, Chassis, LED, Speaker, Gimbal, Blaster
-```
-
-## Camera Feed
+View the tracking overlay:
 
 ```bash
 ros2 run rqt_image_view rqt_image_view
@@ -389,93 +224,113 @@ ros2 run rqt_image_view rqt_image_view
 Select:
 
 ```text
-/camera/image_raw
+/perception/tracking_debug_image
 ```
 
-## Keyboard Teleop
+Check topic rates:
 
 ```bash
-ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -r cmd_vel:=/cmd_vel
+ros2 topic hz /camera/image_color
+ros2 topic hz /people/tracks
+ros2 topic hz /people/depth
+ros2 topic hz /perception/tracking_debug_image
 ```
 
-Useful keys:
-
-```text
-i = forward
-, = backward
-j = rotate left
-l = rotate right
-k = stop
-```
-
-Emergency stop command:
+Emergency stop:
 
 ```bash
+ros2 param set /voice_intent_node stub_text "stop"
 ros2 topic pub /cmd_vel geometry_msgs/msg/Twist "{}" --once
 ```
 
-## Arm and Gripper
+## Follow Distance Evaluation
 
-The ROS arm/gripper actions may abort on some setups even when the hardware works. The RoboMaster text SDK can be used directly.
-
-Open gripper:
+Run the evaluator while the robot is following a person:
 
 ```bash
-printf "command;robotic_gripper open 4;" | nc -w 3 <ROBOT_IP> 40923
+ros2 param set /voice_intent_node stub_text "follow me"
+
+ros2 run robomaster_follow_controller follow_distance_eval --ros-args \
+  -p target_depth_m:=1.5 \
+  -p min_depth_m:=1.4 \
+  -p max_depth_m:=2.2 \
+  -p trial_count:=5 \
+  -p trial_duration_sec:=10.0 \
+  -p settle_time_sec:=2.0 \
+  -p output_csv:=/tmp/follow_distance_eval.csv \
+  -p output_samples_csv:=/tmp/follow_distance_eval_samples.csv
 ```
 
-Close gripper:
+The summary CSV stores per-trial scores. The samples CSV stores raw depth samples
+so later thresholds can be recomputed without another robot run.
+
+More detail: [`docs/FOLLOW_DISTANCE_EVAL.md`](docs/FOLLOW_DISTANCE_EVAL.md).
+
+## Bench Tests Without Robot Motion
+
+Run the integration stack with fake perception and motion disabled:
 
 ```bash
-printf "command;robotic_gripper close 4;" | nc -w 3 <ROBOT_IP> 40923
+ros2 launch cs603_voice_intent integration_demo.launch.py \
+  start_perception:=false \
+  use_fake_perception:=true \
+  enable_motion:=false \
+  enable_arm_gripper:=false \
+  input_mode:=param \
+  stub_text:="follow me"
 ```
 
-Move arm forward 1 cm:
+Watch the output:
 
 ```bash
-printf "command;robotic_arm move x 1 y 0;" | nc -w 3 <ROBOT_IP> 40923
+ros2 topic echo /voice_intent
+ros2 topic echo /behavior_state
+ros2 topic echo /cmd_vel
 ```
 
-Move arm up 1 cm:
+Run the real perception stack with motion disabled:
 
 ```bash
-printf "command;robotic_arm move x 0 y 1;" | nc -w 3 <ROBOT_IP> 40923
+ros2 launch cs603_voice_intent integration_demo.launch.py \
+  start_perception:=true \
+  use_depth:=true \
+  use_identity:=false \
+  enable_motion:=false
 ```
 
-Move arm down 1 cm:
+## Troubleshooting Checks
+
+Confirm all terminals are on the same ROS graph:
 
 ```bash
-printf "command;robotic_arm move x 0 y -1;" | nc -w 3 <ROBOT_IP> 40923
-```
-
-Recenter arm:
-
-```bash
-printf "command;robotic_arm recenter;" | nc -w 5 <ROBOT_IP> 40923
-```
-
-Stop arm:
-
-```bash
-printf "command;robotic_arm stop;" | nc -w 3 <ROBOT_IP> 40923
-```
-
-## Common Checks
-
-List ROS topics:
-
-```bash
+echo $ROS_DOMAIN_ID
+echo $ROS_LOCALHOST_ONLY
+echo $RMW_IMPLEMENTATION
+ros2 node list
 ros2 topic list
 ```
 
-Check camera rate:
+If `rqt_image_view` opens but no image appears, check:
 
 ```bash
-ros2 topic hz /camera/image_raw
+ros2 topic info /perception/tracking_debug_image -v
+ros2 topic hz /perception/tracking_debug_image
 ```
 
-Check arm position:
+If voice commands publish but the robot does not move, check:
 
 ```bash
-ros2 topic echo /arm_position --once
+ros2 topic echo /behavior_state
+ros2 topic echo /follow_target_active
+ros2 topic echo /cmd_vel
 ```
+
+If pickup/drop is ignored, check:
+
+```bash
+ros2 topic echo /behavior_state
+ros2 topic echo /arm_gripper_status
+```
+
+`CMD_PICK` and `CMD_DROP` run only when the FSM is `APPROACHING` or `STOPPED`.
+

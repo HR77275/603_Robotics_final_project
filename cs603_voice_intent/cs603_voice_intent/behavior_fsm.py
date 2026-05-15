@@ -1,16 +1,8 @@
-"""Behavior FSM consuming /voice_intent and publishing /behavior_state.
-
-States: IDLE, FOLLOWING, FOLLOWING_AUTHORIZED, STOPPED, APPROACHING.
-Default is safe: no /cmd_vel published. PID follow controller (separate node)
-subscribes to /follow_target_active and moves only when this FSM is FOLLOWING,
-FOLLOWING_AUTHORIZED, or APPROACHING. Optional speaker ACK via
-/sound/play_sound_id service.
-"""
+"""Voice intent FSM for behavior state and follow activation."""
 
 from __future__ import annotations
 
 import signal
-from dataclasses import dataclass
 
 import rclpy
 from rclpy.node import Node
@@ -39,18 +31,7 @@ INTENT_TO_STATE = {
 }
 
 
-@dataclass(frozen=True)
-class Transition:
-    """One FSM transition record for logging and tests."""
-
-    prev: str
-    next: str
-    intent: str
-
-
 class BehaviorFsm(Node):
-    """Plain rclpy FSM. No /cmd_vel published; emits /behavior_state and /follow_target_active."""
-
     def __init__(self) -> None:
         super().__init__("behavior_fsm")
         self.declare_parameter("intent_topic", "/voice_intent")
@@ -88,10 +69,10 @@ class BehaviorFsm(Node):
             self.get_logger().info(f"intent={intent} no-op; already {self.state}")
             return
 
-        transition = Transition(prev=self.state, next=next_state, intent=intent)
+        prev_state = self.state
         self.state = next_state
         self.get_logger().info(
-            f"FSM: {transition.prev} -> {transition.next} (cause={transition.intent})"
+            f"FSM: {prev_state} -> {self.state} (cause={intent})"
         )
         self._publish_state(reason=intent)
 

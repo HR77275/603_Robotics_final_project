@@ -89,14 +89,12 @@ _COMMAND_PATTERNS = (
 
 
 def normalize_text(text: str) -> str:
-    """Normalize transcript text without changing command semantics."""
     cleaned = text.lower().strip()
     cleaned = re.sub(r"[^a-z0-9\s]", " ", cleaned)
     return re.sub(r"\s+", " ", cleaned).strip()
 
 
 def classify_intent(text: str) -> str:
-    """Map a spoken transcript to the command vocabulary promised in D1/D2."""
     normalized = normalize_text(text)
     if not normalized:
         return CMD_UNKNOWN

@@ -4,8 +4,6 @@ from std_msgs.msg import String
 
 
 class ObjectTriggerStub(Node):
-    """Explicitly labeled placeholder for Soumik's object-trigger lane."""
-
     def __init__(self) -> None:
         super().__init__("object_trigger_stub")
         self.declare_parameter("enabled", False)

@@ -6,7 +6,7 @@ package_name = 'robomaster_perception'
 setup(
     name=package_name,
     version='0.0.0',
-    packages=find_packages(exclude=['test']),
+    packages=find_packages(),
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
@@ -20,7 +20,6 @@ setup(
     maintainer_email='humble_ros2@example.com',
     description='RoboMaster perception and tracking nodes.',
     license='MIT',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'detection_tracker_node = robomaster_perception.detection_tracker_node:main',
