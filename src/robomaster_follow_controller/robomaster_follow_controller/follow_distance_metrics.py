@@ -18,6 +18,8 @@ class DistanceTrialMetrics:
     trial_index: int
     target_depth_m: float
     tolerance_m: float
+    min_depth_m: float
+    max_depth_m: float
     duration_s: float
     message_count: int
     sample_count: int
@@ -39,6 +41,8 @@ def _nan_metrics(
     trial_index: int,
     target_depth_m: float,
     tolerance_m: float,
+    min_depth_m: float,
+    max_depth_m: float,
     duration_s: float,
     message_count: int,
 ) -> DistanceTrialMetrics:
@@ -46,6 +50,8 @@ def _nan_metrics(
         trial_index=trial_index,
         target_depth_m=target_depth_m,
         tolerance_m=tolerance_m,
+        min_depth_m=min_depth_m,
+        max_depth_m=max_depth_m,
         duration_s=duration_s,
         message_count=message_count,
         sample_count=0,
@@ -72,12 +78,25 @@ def compute_trial_metrics(
     tolerance_m: float,
     duration_s: float,
     message_count: int,
+    min_depth_m: float | None = None,
+    max_depth_m: float | None = None,
 ) -> DistanceTrialMetrics:
+    if min_depth_m is None or not math.isfinite(float(min_depth_m)):
+        min_depth_m = target_depth_m - tolerance_m
+    if max_depth_m is None or not math.isfinite(float(max_depth_m)):
+        max_depth_m = target_depth_m + tolerance_m
+    min_depth_m = float(min_depth_m)
+    max_depth_m = float(max_depth_m)
+    if min_depth_m > max_depth_m:
+        min_depth_m, max_depth_m = max_depth_m, min_depth_m
+
     if not samples:
         return _nan_metrics(
             trial_index,
             target_depth_m,
             tolerance_m,
+            min_depth_m,
+            max_depth_m,
             duration_s,
             message_count,
         )
@@ -94,13 +113,15 @@ def compute_trial_metrics(
     ]
 
     hold_rate = sum(
-        1 for error in abs_errors if error <= tolerance_m
-    ) / len(abs_errors)
+        1 for depth in depths if min_depth_m <= depth <= max_depth_m
+    ) / len(depths)
 
     return DistanceTrialMetrics(
         trial_index=trial_index,
         target_depth_m=target_depth_m,
         tolerance_m=tolerance_m,
+        min_depth_m=min_depth_m,
+        max_depth_m=max_depth_m,
         duration_s=duration_s,
         message_count=message_count,
         sample_count=len(samples),
@@ -113,8 +134,8 @@ def compute_trial_metrics(
         rmse_m=math.sqrt(mean(squared_errors)),
         bias_m=bias,
         std_error_m=std_error,
-        max_too_close_m=max(0.0, -min(errors)),
-        max_too_far_m=max(0.0, max(errors)),
+        max_too_close_m=max(0.0, min_depth_m - min(depths)),
+        max_too_far_m=max(0.0, max(depths) - max_depth_m),
         mean_abs_delta_m=mean(deltas) if deltas else 0.0,
         max_abs_delta_m=max(deltas) if deltas else 0.0,
         score_pct=100.0 * hold_rate,
@@ -137,6 +158,7 @@ def format_trial_metrics(metrics: DistanceTrialMetrics) -> str:
         f"trial={metrics.trial_index} "
         f"score={metrics.score_pct:.1f}% "
         f"hold_rate={100.0 * metrics.hold_rate:.1f}% "
+        f"range={metrics.min_depth_m:.2f}-{metrics.max_depth_m:.2f}m "
         f"mean_depth={metrics.mean_depth_m:.2f}m "
         f"mae={metrics.mae_m:.2f}m "
         f"rmse={metrics.rmse_m:.2f}m "
@@ -146,4 +168,3 @@ def format_trial_metrics(metrics: DistanceTrialMetrics) -> str:
         f"jitter={metrics.mean_abs_delta_m:.2f}m "
         f"samples={metrics.sample_count}/{metrics.message_count}"
     )
-

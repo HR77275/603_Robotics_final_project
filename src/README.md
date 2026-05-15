@@ -213,6 +213,10 @@ ros2 topic echo /cmd_vel --once --no-daemon
 ```
 
 Tune PID and speed limits in `robomaster_follow_controller/config/follow.yaml`.
+The forward speed cap can scale with depth: near the target it uses
+`max_linear_mps`, then ramps toward `far_max_linear_mps` as the person gets
+farther than `speed_scale_start_error_m`, reaching the higher cap at
+`speed_scale_full_error_m`. Reverse speed remains capped by `max_linear_mps`.
 
 ## Face Identity Workflow
 

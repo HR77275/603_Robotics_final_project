@@ -36,6 +36,32 @@ def is_authorized_identity(identity, authorized_statuses):
     return status in allowed_statuses
 
 
+def depth_scaled_linear_limit(
+    depth_error,
+    base_limit,
+    far_limit,
+    start_error,
+    full_error,
+    enabled=True,
+):
+    base_limit = abs(float(base_limit))
+    far_limit = max(base_limit, abs(float(far_limit)))
+    if not enabled:
+        return base_limit
+
+    depth_error = float(depth_error)
+    if not math.isfinite(depth_error):
+        return base_limit
+
+    start_error = max(0.0, float(start_error))
+    full_error = max(start_error + 1e-6, float(full_error))
+    if depth_error <= start_error:
+        return base_limit
+
+    ratio = min(1.0, (depth_error - start_error) / (full_error - start_error))
+    return base_limit + ratio * (far_limit - base_limit)
+
+
 class PID:
     def __init__(self, kp, ki, kd, integral_limit):
         self.kp = float(kp)
@@ -90,6 +116,10 @@ class FollowNode(Node):
         self.declare_parameter('angular_kd', 0.08)
         self.declare_parameter('integral_limit', 0.5)
         self.declare_parameter('max_linear_mps', 0.18)
+        self.declare_parameter('far_max_linear_mps', 0.30)
+        self.declare_parameter('depth_scaled_speed_enabled', True)
+        self.declare_parameter('speed_scale_start_error_m', 0.25)
+        self.declare_parameter('speed_scale_full_error_m', 0.90)
         self.declare_parameter('max_angular_radps', 0.6)
         self.declare_parameter('deadband_distance_m', 0.08)
         self.declare_parameter('deadband_center_norm', 0.04)
@@ -361,7 +391,16 @@ class FollowNode(Node):
         if abs(center_error) > float(self.get_parameter('angular_only_error_norm').value):
             linear_x = 0.0
 
-        linear_x = self.clamp(linear_x, self.get_parameter('max_linear_mps').value)
+        base_linear_limit = abs(float(self.get_parameter('max_linear_mps').value))
+        forward_linear_limit = depth_scaled_linear_limit(
+            depth_error,
+            base_linear_limit,
+            self.get_parameter('far_max_linear_mps').value,
+            self.get_parameter('speed_scale_start_error_m').value,
+            self.get_parameter('speed_scale_full_error_m').value,
+            bool(self.get_parameter('depth_scaled_speed_enabled').value),
+        )
+        linear_x = max(-base_linear_limit, min(forward_linear_limit, linear_x))
         angular_z = self.clamp(angular_z, self.get_parameter('max_angular_radps').value)
 
         cmd = Twist()

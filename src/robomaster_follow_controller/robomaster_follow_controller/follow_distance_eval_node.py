@@ -38,6 +38,8 @@ class FollowDistanceEvalNode(Node):
         self.declare_parameter("state_topic", "/behavior_state")
         self.declare_parameter("target_depth_m", 1.5)
         self.declare_parameter("tolerance_m", 0.15)
+        self.declare_parameter("min_depth_m", 1.4)
+        self.declare_parameter("max_depth_m", 2.2)
         self.declare_parameter("trial_count", 5)
         self.declare_parameter("trial_duration_sec", 10.0)
         self.declare_parameter("settle_time_sec", 2.0)
@@ -50,6 +52,7 @@ class FollowDistanceEvalNode(Node):
         )
         self.declare_parameter("pass_hold_rate_pct", 80.0)
         self.declare_parameter("output_csv", "")
+        self.declare_parameter("output_samples_csv", "")
         self.declare_parameter("auto_shutdown", True)
 
         self.behavior_state = ""
@@ -60,6 +63,7 @@ class FollowDistanceEvalNode(Node):
         self.trial_samples: list[DistanceSample] = []
         self.trial_message_count = 0
         self.metrics: list[DistanceTrialMetrics] = []
+        self.samples_by_trial: list[tuple[int, list[DistanceSample]]] = []
 
         people_depth_topic = str(self.get_parameter("people_depth_topic").value)
         state_topic = str(self.get_parameter("state_topic").value)
@@ -67,10 +71,11 @@ class FollowDistanceEvalNode(Node):
         self.create_subscription(String, state_topic, self.state_cb, 10)
         self.create_timer(0.2, self.timer_cb)
 
+        min_depth_m, max_depth_m = self.depth_range
         self.get_logger().info(
             "follow_distance_eval ready: "
             f"target={self.target_depth_m:.2f}m "
-            f"tolerance=+/-{self.tolerance_m:.2f}m "
+            f"range={min_depth_m:.2f}-{max_depth_m:.2f}m "
             f"trials={self.trial_count} "
             f"duration={self.trial_duration_sec:.1f}s "
             f"depth_topic={people_depth_topic}"
@@ -83,6 +88,22 @@ class FollowDistanceEvalNode(Node):
     @property
     def tolerance_m(self) -> float:
         return float(self.get_parameter("tolerance_m").value)
+
+    @property
+    def min_depth_m(self) -> float:
+        return float(self.get_parameter("min_depth_m").value)
+
+    @property
+    def max_depth_m(self) -> float:
+        return float(self.get_parameter("max_depth_m").value)
+
+    @property
+    def depth_range(self) -> tuple[float, float]:
+        min_depth_m = self.min_depth_m
+        max_depth_m = self.max_depth_m
+        if min_depth_m > max_depth_m:
+            return max_depth_m, min_depth_m
+        return min_depth_m, max_depth_m
 
     @property
     def trial_count(self) -> int:
@@ -190,15 +211,19 @@ class FollowDistanceEvalNode(Node):
         )
 
     def finish_trial(self) -> None:
+        min_depth_m, max_depth_m = self.depth_range
         metrics = compute_trial_metrics(
             trial_index=self.trial_index,
             samples=self.trial_samples,
             target_depth_m=self.target_depth_m,
             tolerance_m=self.tolerance_m,
+            min_depth_m=min_depth_m,
+            max_depth_m=max_depth_m,
             duration_s=self.trial_duration_sec,
             message_count=self.trial_message_count,
         )
         self.metrics.append(metrics)
+        self.samples_by_trial.append((self.trial_index, list(self.trial_samples)))
         self.get_logger().info(format_trial_metrics(metrics))
 
         if self.trial_index >= self.trial_count:
@@ -211,6 +236,7 @@ class FollowDistanceEvalNode(Node):
     def finish_evaluation(self) -> None:
         self.phase = PHASE_DONE
         self.write_csv()
+        self.write_samples_csv()
         self.log_summary()
         if bool(self.get_parameter("auto_shutdown").value):
             rclpy.shutdown()
@@ -223,6 +249,7 @@ class FollowDistanceEvalNode(Node):
         path = Path(output_csv).expanduser()
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", newline="") as stream:
+            min_depth_m, max_depth_m = self.depth_range
             writer = csv.DictWriter(
                 stream,
                 fieldnames=list(DistanceTrialMetrics.__dataclass_fields__),
@@ -232,7 +259,64 @@ class FollowDistanceEvalNode(Node):
                 writer.writerow(metrics.__dict__)
         self.get_logger().info(f"wrote follow distance metrics to {path}")
 
+    def samples_csv_path(self) -> Path | None:
+        output_samples_csv = str(
+            self.get_parameter("output_samples_csv").value
+        ).strip()
+        if output_samples_csv:
+            return Path(output_samples_csv).expanduser()
+
+        output_csv = str(self.get_parameter("output_csv").value).strip()
+        if not output_csv:
+            return None
+
+        metrics_path = Path(output_csv).expanduser()
+        return metrics_path.with_name(f"{metrics_path.stem}_samples{metrics_path.suffix}")
+
+    def write_samples_csv(self) -> None:
+        path = self.samples_csv_path()
+        if path is None:
+            return
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", newline="") as stream:
+            writer = csv.DictWriter(
+                stream,
+                fieldnames=[
+                    "trial_index",
+                    "sample_index",
+                    "time_s",
+                    "track_id",
+                    "depth_m",
+                    "target_depth_m",
+                    "min_depth_m",
+                    "max_depth_m",
+                    "error_m",
+                    "in_range",
+                ],
+            )
+            writer.writeheader()
+            for trial_index, samples in self.samples_by_trial:
+                for sample_index, sample in enumerate(samples, start=1):
+                    depth_m = float(sample.depth_m)
+                    writer.writerow(
+                        {
+                            "trial_index": trial_index,
+                            "sample_index": sample_index,
+                            "time_s": f"{sample.time_s:.3f}",
+                            "track_id": int(sample.track_id),
+                            "depth_m": f"{depth_m:.3f}",
+                            "target_depth_m": f"{self.target_depth_m:.3f}",
+                            "min_depth_m": f"{min_depth_m:.3f}",
+                            "max_depth_m": f"{max_depth_m:.3f}",
+                            "error_m": f"{depth_m - self.target_depth_m:.3f}",
+                            "in_range": min_depth_m <= depth_m <= max_depth_m,
+                        }
+                    )
+        self.get_logger().info(f"wrote follow distance samples to {path}")
+
     def log_summary(self) -> None:
+        min_depth_m, max_depth_m = self.depth_range
         mean_score = mean_finite([metrics.score_pct for metrics in self.metrics])
         mean_hold_rate = mean_finite(
             [100.0 * metrics.hold_rate for metrics in self.metrics]
@@ -253,7 +337,7 @@ class FollowDistanceEvalNode(Node):
         self.get_logger().info(
             "follow distance evaluation summary: "
             f"target={self.target_depth_m:.2f}m "
-            f"tolerance=+/-{self.tolerance_m:.2f}m "
+            f"range={min_depth_m:.2f}-{max_depth_m:.2f}m "
             f"mean_score={mean_score:.1f}% "
             f"mean_hold_rate={mean_hold_rate:.1f}% "
             f"mean_mae={mean_mae:.2f}m "
@@ -278,4 +362,3 @@ def main(args=None) -> None:
 
 if __name__ == "__main__":
     main()
-
