@@ -237,7 +237,7 @@ ros2 topic pub --once /voice_intent std_msgs/msg/String "{data: CMD_DROP}"
 
 ## Pickup And Drop
 
-Pickup/drop is intentionally gated by the FSM. Use:
+Pickup/drop is intentionally gated by the FSM. `CMD_PICK` and `CMD_DROP` run only when the FSM is `APPROACHING` or `STOPPED`. Use:
 
 ```bash
 ros2 param set /voice_intent_node stub_text "come here"
@@ -317,70 +317,4 @@ so later thresholds can be recomputed without another robot run.
 
 More detail: [`docs/FOLLOW_DISTANCE_EVAL.md`](docs/FOLLOW_DISTANCE_EVAL.md).
 
-## Bench Tests Without Robot Motion
 
-Run the integration stack with fake perception and motion disabled:
-
-```bash
-ros2 launch cs603_voice_intent integration_demo.launch.py \
-  start_perception:=false \
-  use_fake_perception:=true \
-  enable_motion:=false \
-  enable_arm_gripper:=false \
-  input_mode:=param \
-  stub_text:="follow me"
-```
-
-Watch the output:
-
-```bash
-ros2 topic echo /voice_intent
-ros2 topic echo /behavior_state
-ros2 topic echo /cmd_vel
-```
-
-Run the real perception stack with motion disabled:
-
-```bash
-ros2 launch cs603_voice_intent integration_demo.launch.py \
-  start_perception:=true \
-  use_depth:=true \
-  use_identity:=false \
-  enable_motion:=false
-```
-
-## Troubleshooting Checks
-
-Confirm all terminals are on the same ROS graph:
-
-```bash
-echo $ROS_DOMAIN_ID
-echo $ROS_LOCALHOST_ONLY
-echo $RMW_IMPLEMENTATION
-ros2 node list
-ros2 topic list
-```
-
-If `rqt_image_view` opens but no image appears, check:
-
-```bash
-ros2 topic info /perception/tracking_debug_image -v
-ros2 topic hz /perception/tracking_debug_image
-```
-
-If voice commands publish but the robot does not move, check:
-
-```bash
-ros2 topic echo /behavior_state
-ros2 topic echo /follow_target_active
-ros2 topic echo /cmd_vel
-```
-
-If pickup/drop is ignored, check:
-
-```bash
-ros2 topic echo /behavior_state
-ros2 topic echo /arm_gripper_status
-```
-
-`CMD_PICK` and `CMD_DROP` run only when the FSM is `APPROACHING` or `STOPPED`.
